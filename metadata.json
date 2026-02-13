@@ -1,0 +1,8 @@
+{
+  "name": "Counter Enterprise",
+  "description": "SaaS para controle de rotinas operacionais focado em PMEs brasileiras, com evidência fotográfica, geolocalização e auditoria em tempo real.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
