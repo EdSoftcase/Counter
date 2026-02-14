@@ -1,36 +1,71 @@
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 export const getOperationalInsights = async (complianceData: any) => {
-  // A chave de API deve ser obtida exclusivamente da variável de ambiente process.env.API_KEY
-  if (!process.env.API_KEY) {
-    console.warn("API_KEY não encontrada nas variáveis de ambiente.");
-    return "Insights desativados: Configure a API_KEY nas configurações do Vercel para habilitar a análise de IA.";
-  }
+  if (!process.env.API_KEY) return "Insights desativados: Configure a API_KEY.";
 
   try {
-    // Inicialização do SDK utilizando process.env.API_KEY diretamente no construtor
+    // Re-initialize GoogleGenAI on each request to ensure it uses the latest API key.
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const prompt = `
-      Atue como um Consultor de Operações Especialista. Analise os seguintes dados de conformidade de uma empresa:
-      ${JSON.stringify(complianceData)}
-      
-      Gere um resumo executivo curto (máximo 3 parágrafos) em Português do Brasil destacando:
-      1. O nível geral de eficiência.
-      2. Possíveis gargalos ou unidades críticas.
-      3. Recomendações acionáveis para melhorar a execução das rotinas.
-    `;
-
-    // Chamada ao modelo gemini-3-flash-preview conforme diretrizes para tarefas de texto básicas
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: prompt,
+      contents: `
+        Analise os dados: ${JSON.stringify(complianceData)}
+        Gere um resumo executivo curto em PT-BR destacando eficiência, gargalos e recomendações.
+      `,
     });
-
-    // Acesso direto à propriedade .text da resposta
     return response.text;
   } catch (error) {
     console.error("Error fetching AI insights:", error);
-    return "Erro ao processar insights de IA. Verifique se a chave de API é válida e se há conexão com a internet.";
+    return "Erro ao processar insights de IA.";
+  }
+};
+
+export const analyzeInventoryImage = async (base64Image: string, itemName?: string, existingItems?: string[]) => {
+  if (!process.env.API_KEY) throw new Error("API_KEY não configurada.");
+
+  const prompt = itemName 
+    ? `Você é um assistente de logística. Analise esta imagem (nota fiscal ou produto) e extraia a QUANTIDADE e o PREÇO UNITÁRIO referente ao item "${itemName}".`
+    : `Você é um assistente de logística. Analise esta imagem e identifique qual destes produtos está sendo entregue: [${existingItems?.join(', ')}]. Além disso, extraia a QUANTIDADE e o PREÇO UNITÁRIO.`;
+
+  try {
+    // Re-initialize GoogleGenAI on each request to ensure it uses the latest API key.
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: 'image/jpeg',
+              data: base64Image.split(',')[1] || base64Image,
+            },
+          },
+          {
+            text: `${prompt} 
+            Retorne APENAS um objeto JSON no formato: {"productName": string, "quantity": number, "price": number}. 
+            Se não identificar o nome, use "". Se não encontrar valores, use 0.`
+          },
+        ],
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            productName: { type: Type.STRING },
+            quantity: { type: Type.NUMBER },
+            price: { type: Type.NUMBER },
+          },
+          required: ["productName", "quantity", "price"],
+        },
+      },
+    });
+
+    const result = JSON.parse(response.text || '{"productName": "", "quantity": 0, "price": 0}');
+    return result;
+  } catch (error) {
+    console.error("Erro na análise de imagem IA:", error);
+    throw error;
   }
 };

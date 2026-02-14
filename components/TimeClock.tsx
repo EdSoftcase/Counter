@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  Clock, Edit3, Loader2, CheckCircle2, AlertCircle, Fingerprint, DatabaseZap, UserPlus
+  Clock, Edit3, Loader2, CheckCircle2, AlertCircle, Fingerprint, DatabaseZap, UserPlus, AlertTriangle, Moon
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../services/supabase';
 
@@ -13,6 +13,7 @@ const TimeClock: React.FC = () => {
   const [errorStatus, setErrorStatus] = useState<string | null>(null);
   const [validUserId, setValidUserId] = useState<string | null>(null);
   const [isCheckingUser, setIsCheckingUser] = useState(true);
+  const [lastPunch, setLastPunch] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -24,27 +25,15 @@ const TimeClock: React.FC = () => {
 
   const initializeApp = async () => {
     setIsCheckingUser(true);
-    await Promise.all([
-      fetchValidUser(),
-      fetchLogs()
-    ]);
+    await fetchValidUser();
+    await fetchLogs();
     setIsCheckingUser(false);
   };
 
   const fetchValidUser = async () => {
     try {
-      // Tenta buscar o primeiro usuário na tabela profiles para garantir uma FK válida
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id')
-        .limit(1)
-        .single();
-      
-      if (data) {
-        setValidUserId(data.id);
-      } else {
-        console.warn("Nenhum perfil encontrado na tabela 'profiles'. O registro de ponto falhará sem um usuário válido.");
-      }
+      const { data } = await supabase.from('profiles').select('id').limit(1).single();
+      if (data) setValidUserId(data.id);
     } catch (err) {
       console.error("Erro ao validar usuário:", err);
     }
@@ -60,12 +49,19 @@ const TimeClock: React.FC = () => {
         .order('timestamp', { ascending: false });
       
       if (error) {
-        if (error.message.includes('API key')) {
-          setErrorStatus('invalid_key');
-        }
+        if (error.message.includes('API key')) setErrorStatus('invalid_key');
         throw error;
       }
+      
       setLogs(data || []);
+      
+      // Define o último tipo de ponto para controlar os botões
+      if (data && data.length > 0) {
+        // Pegamos apenas o último do dia atual (ou o último absoluto para simplificar a trava)
+        setLastPunch(data[0].type);
+      } else {
+        setLastPunch(null);
+      }
     } catch (err: any) {
       console.error("Erro ao buscar logs de ponto:", err);
     } finally {
@@ -73,20 +69,37 @@ const TimeClock: React.FC = () => {
     }
   };
 
-  const handlePunch = async (type: string) => {
-    if (!isSupabaseConfigured) {
-      alert("Configuração do Supabase não encontrada.");
-      return;
-    }
+  const validatePunchIntelligence = (type: string): boolean => {
+    const hour = currentTime.getHours();
+    const minutes = currentTime.getMinutes();
+    const timeVal = hour + minutes / 60;
 
-    if (!validUserId) {
-      alert("Erro: Nenhum funcionário encontrado no banco. Vá em 'Equipe' e crie um perfil primeiro para vincular o ponto.");
-      return;
-    }
-
-    if (loading) return;
-    setLoading(true);
+    // Lógica para Pizzaria (17h às 00h)
     
+    // 1. Alerta de Saída Premocce (Perto da abertura)
+    if ((type === 'SAIDA' || type === 'SAIDA_INTERVALO') && (timeVal >= 16 && timeVal <= 18.5)) {
+      return confirm(`⚠️ AVISO OPERACIONAL:\n\nSão ${currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}. A pizzaria acabou de abrir ou está em preparação.\n\nTem certeza que deseja registrar uma SAÍDA agora?`);
+    }
+
+    // 2. Alerta de Entrada Tardia (Perto do fechamento)
+    if ((type === 'ENTRADA' || type === 'RETORNO_INTERVALO') && (timeVal >= 23 || timeVal <= 2)) {
+      return confirm(`⚠️ AVISO OPERACIONAL:\n\nSão ${currentTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}. Estamos próximos ao fechamento (00h).\n\nTem certeza que deseja registrar uma ENTRADA a esta hora?`);
+    }
+
+    return true;
+  };
+
+  const handlePunch = async (type: string) => {
+    if (!isSupabaseConfigured) return;
+    if (!validUserId) {
+      alert("Erro: Perfil não encontrado. Cadastre-se na aba Equipe.");
+      return;
+    }
+
+    // Inteligência de Horário
+    if (!validatePunchIntelligence(type)) return;
+
+    setLoading(true);
     const punchData = {
       user_id: validUserId, 
       timestamp: new Date().toISOString(),
@@ -97,37 +110,38 @@ const TimeClock: React.FC = () => {
 
     try {
       const { error } = await supabase.from('time_logs').insert([punchData]);
+      if (error) throw error;
       
-      if (error) {
-        if (error.message.includes('foreign key')) {
-          alert("Erro de Banco: O usuário vinculado não existe mais. Recarregue a página.");
-        } else {
-          alert(`Erro ao registrar: ${error.message}`);
-        }
-        throw error;
-      }
-      
-      alert(`Ponto de ${type.replace('_', ' ')} registrado com sucesso!`);
+      alert(`Ponto de ${type.replace('_', ' ')} registrado!`);
       await fetchLogs();
     } catch (err: any) {
-      console.error("Erro ao registrar ponto:", err);
+      alert(`Erro: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  if (errorStatus === 'invalid_key') {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 px-6 bg-white rounded-[3rem] border-2 border-dashed border-amber-200 text-center space-y-4">
-        <div className="p-4 bg-amber-50 text-amber-500 rounded-full">
-          <DatabaseZap size={48} />
-        </div>
-        <h3 className="text-xl font-black text-slate-800">Erro de Autenticação</h3>
-        <p className="text-slate-500 max-w-md">A chave de API do Supabase é inválida.</p>
-        <button onClick={fetchLogs} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-bold uppercase text-xs tracking-widest">Tentar Novamente</button>
-      </div>
-    );
-  }
+  // Lógica de Desativação de Botões (Máquina de Estados)
+  const isButtonDisabled = (type: string): boolean => {
+    if (loading || isCheckingUser || !validUserId) return true;
+
+    switch (type) {
+      case 'ENTRADA':
+        // Desativa se o último ponto foi entrada ou retorno (já está trabalhando)
+        return lastPunch === 'ENTRADA' || lastPunch === 'RETORNO_INTERVALO' || lastPunch === 'SAIDA_INTERVALO';
+      case 'SAIDA_INTERVALO':
+        // Só permite se o último foi entrada
+        return lastPunch !== 'ENTRADA';
+      case 'RETORNO_INTERVALO':
+        // Só permite se o último foi saída intervalo
+        return lastPunch !== 'SAIDA_INTERVALO';
+      case 'SAIDA':
+        // Só permite se estiver trabalhando (entrada ou retorno)
+        return lastPunch !== 'ENTRADA' && lastPunch !== 'RETORNO_INTERVALO';
+      default:
+        return false;
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
@@ -157,8 +171,15 @@ const TimeClock: React.FC = () => {
             </button>
           ))}
         </div>
-        <div className="text-right hidden sm:block">
-          <p className="text-3xl font-black text-slate-800 tracking-tighter">{currentTime.toLocaleTimeString()}</p>
+        
+        <div className="flex items-center gap-4 bg-white px-6 py-3 rounded-2xl border border-slate-200 shadow-sm">
+          <div className="text-right">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Pizzaria Aberta</p>
+            <p className="text-xl font-black text-slate-800 tracking-tighter">{currentTime.toLocaleTimeString()}</p>
+          </div>
+          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+            <Moon size={20} />
+          </div>
         </div>
       </header>
 
@@ -169,11 +190,8 @@ const TimeClock: React.FC = () => {
               <AlertCircle className="shrink-0" size={24} />
               <div className="flex-1">
                 <p className="font-bold text-sm">Nenhum funcionário encontrado!</p>
-                <p className="text-xs opacity-80">Para registrar ponto, você precisa primeiro cadastrar um perfil na aba de Equipe/Funcionários.</p>
+                <p className="text-xs opacity-80">Cadastre um perfil na aba de Equipe para habilitar o ponto.</p>
               </div>
-              <button className="bg-amber-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1">
-                 <UserPlus size={14} /> Criar Agora
-              </button>
             </div>
           )}
 
@@ -181,32 +199,61 @@ const TimeClock: React.FC = () => {
             <div className="absolute top-0 right-0 p-12 opacity-5">
                <Fingerprint size={200} />
             </div>
+            
             <div className="relative z-10">
-              <h2 className="text-6xl font-black mb-12 tracking-tighter">
-                {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-4xl mx-auto">
-                {[
-                  { type: 'ENTRADA', color: 'bg-emerald-500 hover:bg-emerald-400' },
-                  { type: 'SAIDA_INTERVALO', color: 'bg-amber-500 hover:bg-amber-400' },
-                  { type: 'RETORNO_INTERVALO', color: 'bg-blue-500 hover:bg-blue-400' },
-                  { type: 'SAIDA', color: 'bg-rose-500 hover:bg-rose-400' }
-                ].map((btn) => (
-                  <button 
-                    key={btn.type}
-                    onClick={() => handlePunch(btn.type)}
-                    disabled={loading || isCheckingUser || !validUserId}
-                    className={`${btn.color} p-6 rounded-[2rem] shadow-xl transition-all active:scale-95 flex flex-col items-center gap-3 disabled:opacity-30 disabled:grayscale group border border-white/10`}
-                  >
-                    {loading ? <Loader2 className="animate-spin" size={24} /> : <Clock size={24} className="group-hover:rotate-12 transition-transform" />}
-                    <span className="text-[10px] font-black uppercase tracking-widest">{btn.type.replace('_', ' ')}</span>
-                  </button>
-                ))}
+              <div className="mb-12">
+                <span className="inline-flex items-center gap-2 px-4 py-1.5 bg-white/10 rounded-full text-[10px] font-black uppercase tracking-widest mb-4 border border-white/10">
+                  <AlertTriangle size={12} className="text-amber-400" /> Inteligência Operacional Ativa
+                </span>
+                <h2 className="text-7xl font-black tracking-tighter">
+                  {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </h2>
+                <p className="text-slate-400 font-bold mt-2 uppercase text-xs tracking-[0.3em]">Horário de Brasília</p>
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl mx-auto">
+                {[
+                  { type: 'ENTRADA', label: 'Entrada', color: 'bg-emerald-500 hover:bg-emerald-400' },
+                  { type: 'SAIDA_INTERVALO', label: 'Saída Intervalo', color: 'bg-amber-500 hover:bg-amber-400' },
+                  { type: 'RETORNO_INTERVALO', label: 'Retorno Intervalo', color: 'bg-blue-500 hover:bg-blue-400' },
+                  { type: 'SAIDA', label: 'Saída Turno', color: 'bg-rose-500 hover:bg-rose-400' }
+                ].map((btn) => {
+                  const disabled = isButtonDisabled(btn.type);
+                  return (
+                    <button 
+                      key={btn.type}
+                      onClick={() => handlePunch(btn.type)}
+                      disabled={disabled}
+                      className={`${disabled ? 'bg-slate-700 opacity-40 grayscale cursor-not-allowed' : btn.color} p-8 rounded-[2.5rem] shadow-xl transition-all active:scale-95 flex flex-col items-center gap-4 group border border-white/10`}
+                    >
+                      {loading && btn.type === lastPunch ? (
+                        <Loader2 className="animate-spin" size={32} />
+                      ) : (
+                        <div className={`p-3 rounded-2xl ${disabled ? 'bg-slate-800 text-slate-500' : 'bg-white/20 text-white'} transition-transform group-hover:scale-110`}>
+                          <Clock size={28} />
+                        </div>
+                      )}
+                      <span className="text-[11px] font-black uppercase tracking-widest">{btn.label}</span>
+                      {lastPunch === btn.type && !disabled && (
+                        <span className="absolute -top-2 -right-2 bg-white text-slate-900 text-[8px] font-black px-2 py-1 rounded-full shadow-lg border border-slate-200">ÚLTIMO</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              
               {isCheckingUser && (
-                <p className="mt-8 text-slate-400 text-xs animate-pulse">Validando autenticação com Supabase...</p>
+                <p className="mt-8 text-slate-400 text-xs animate-pulse">Sincronizando estado do ponto...</p>
               )}
             </div>
+          </div>
+          
+          <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-[2rem] flex items-center gap-4 text-indigo-700">
+             <AlertTriangle size={20} className="shrink-0" />
+             <p className="text-[11px] font-bold leading-relaxed uppercase tracking-tight">
+               <span className="font-black">REGRAS DA PIZZARIA:</span> Abertura às 17:00 | Fechamento às 00:00. 
+               O sistema monitora registros fora de conformidade com o turno noturno.
+             </p>
           </div>
         </div>
       )}
@@ -233,7 +280,7 @@ const TimeClock: React.FC = () => {
                         <span className="font-bold text-slate-700">{new Date(log.timestamp).toLocaleString()}</span>
                       </td>
                       <td className="px-8 py-5">
-                        <span className="text-[10px] font-black bg-slate-100 px-2 py-1 rounded text-slate-600">{log.type}</span>
+                        <span className="text-[10px] font-black bg-slate-100 px-2 py-1 rounded text-slate-600">{log.type.replace('_', ' ')}</span>
                       </td>
                       <td className="px-8 py-5">{getStatusBadge(log.status)}</td>
                       <td className="px-8 py-5 text-right">

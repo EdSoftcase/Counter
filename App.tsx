@@ -44,7 +44,6 @@ const App: React.FC = () => {
     setUserRole(role);
     setUserName(name);
     setIsLoggedIn(true);
-    // Funcionários começam na tela de Ponto ou Execução
     if (role === UserRole.OPERATOR) {
       setActiveTab('timeclock');
     } else {
@@ -109,7 +108,7 @@ const App: React.FC = () => {
         isOpen={isSidebarOpen}
       />
       
-      <main className={`flex-1 transition-all duration-300 ${isLoggedIn ? 'lg:ml-64' : ''}`}>
+      <main className={`flex-1 transition-all duration-300 lg:ml-64`}>
         <header className="flex justify-between items-center bg-white border-b border-slate-200 sticky top-0 z-30 px-4 lg:px-8 h-16 lg:h-20 shadow-sm lg:shadow-none">
           <div className="flex items-center gap-4 flex-1">
              <button 
@@ -155,7 +154,6 @@ const App: React.FC = () => {
           {renderContent()}
         </div>
 
-        {/* Menu Mobile persistente para facilitar o uso por funcionários */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-2 flex justify-around items-center lg:hidden z-30 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
           <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-emerald-500' : 'text-slate-400'}`}>
             <Menu size={20} />

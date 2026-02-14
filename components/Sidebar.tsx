@@ -14,7 +14,9 @@ import {
   LogOut,
   Users,
   BarChart3,
-  PackageSearch
+  PackageSearch,
+  ShieldAlert,
+  Wallet
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -32,6 +34,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userRole, on
     { id: 'routines', label: 'Rotinas', icon: ClipboardList, roles: ['ADMIN', 'SUPERVISOR'] },
     { id: 'execution', label: 'Executar Tarefas', icon: CheckCircle2, roles: ['ADMIN', 'SUPERVISOR', 'OPERATOR'] },
     { id: 'inventory', label: 'Suprimentos', icon: PackageSearch, roles: ['ADMIN', 'SUPERVISOR'] },
+    { id: 'compliance', label: 'Conformidade & RH', icon: ShieldAlert, roles: ['ADMIN', 'SUPERVISOR'] },
+    { id: 'finance', label: 'Financeiro', icon: Wallet, roles: ['ADMIN'] },
     { id: 'users', label: 'Funcionários', icon: Users, roles: ['ADMIN', 'SUPERVISOR'] },
     { id: 'reports', label: 'Relatórios', icon: BarChart3, roles: ['ADMIN', 'SUPERVISOR'] },
     { id: 'audit', label: 'Auditoria & Logs', icon: ShieldCheck, roles: ['ADMIN', 'SUPERVISOR'] },
