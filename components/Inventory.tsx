@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../services/supabase';
@@ -50,8 +51,10 @@ const Inventory: React.FC = () => {
               {insumos.map((item) => (
                 <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-8 py-6 font-black text-slate-800">{item.name}</td>
-                  <td className="px-8 py-6 text-center font-mono font-black text-emerald-600">{item.currentStock} {item.unit}</td>
-                  <td className="px-8 py-6 text-right font-mono font-bold text-slate-400">{item.idealQuantity} {item.unit}</td>
+                  {/* Fixed: currentStock -> current_stock to match StockItem interface */}
+                  <td className="px-8 py-6 text-center font-mono font-black text-emerald-600">{item.current_stock} {item.unit}</td>
+                  {/* Fixed: idealQuantity -> ideal_quantity to match StockItem interface */}
+                  <td className="px-8 py-6 text-right font-mono font-bold text-slate-400">{item.ideal_quantity} {item.unit}</td>
                 </tr>
               ))}
               {insumos.length === 0 && (

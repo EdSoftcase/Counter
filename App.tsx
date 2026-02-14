@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import Execution from './components/Execution';
@@ -15,13 +16,21 @@ import Login from './components/Login';
 import RoutineManager from './components/RoutineManager';
 import Inventory from './components/Inventory';
 import { UserRole } from './types';
-import { Bell, Search, Menu, Clock, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Bell, Search, Menu, Clock, CheckCircle2, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react';
+import { isSupabaseConfigured } from './services/supabase';
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [userRole] = useState<UserRole>(UserRole.ADMIN);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showConfigWarning, setShowConfigWarning] = useState(false);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setShowConfigWarning(true);
+    }
+  }, []);
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -60,6 +69,15 @@ const App: React.FC = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-50 flex-col lg:flex-row">
+      {/* Banner de Erro de Configuração */}
+      {showConfigWarning && (
+        <div className="fixed top-0 left-0 right-0 bg-amber-500 text-white z-[100] px-4 py-2 flex items-center justify-center gap-3 shadow-lg animate-slide-down">
+          <AlertTriangle size={18} />
+          <span className="text-sm font-bold">Configuração incompleta: Verifique suas chaves do Supabase no Vercel/Ambiente.</span>
+          <button onClick={() => setShowConfigWarning(false)} className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-bold transition-all">Fechar</button>
+        </div>
+      )}
+
       {isSidebarOpen && (
         <div 
           className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 lg:hidden"
@@ -98,8 +116,8 @@ const App: React.FC = () => {
           <div className="flex items-center gap-3 lg:gap-6">
             <div className="flex flex-col text-right hidden sm:flex">
               <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Status da Rede</span>
-              <span className="text-xs text-emerald-600 font-bold flex items-center gap-1 justify-end">
-                <ShieldCheck size={12} /> Cloud Sync: Ativo
+              <span className={`text-xs font-bold flex items-center gap-1 justify-end ${isSupabaseConfigured ? 'text-emerald-600' : 'text-amber-500'}`}>
+                <ShieldCheck size={12} /> {isSupabaseConfigured ? 'Cloud Sync: Ativo' : 'Aguardando Configuração'}
               </span>
             </div>
             
@@ -121,6 +139,7 @@ const App: React.FC = () => {
           {renderContent()}
         </div>
 
+        {/* Footer Mobile */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-2 flex justify-around items-center lg:hidden z-30 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
           <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-emerald-500' : 'text-slate-400'}`}>
             <Menu size={20} />

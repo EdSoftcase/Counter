@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   Plus, Calendar, MapPin, 
@@ -31,20 +32,26 @@ const RoutineManager: React.FC = () => {
   const handleSave = async () => {
     if (!formTitle) return alert('O título é obrigatório.');
 
-    const { error } = await supabase.from('routines').insert([{
-      title: formTitle,
-      description: formDesc,
-      frequency: Frequency.DAILY,
-      deadline: '10:00'
-    }]);
+    try {
+      const { error } = await supabase.from('routines').insert([{
+        title: formTitle,
+        description: formDesc,
+        frequency: Frequency.DAILY,
+        deadline: '12:00',
+        require_photo: true,
+        require_geo: true
+      }]);
 
-    if (!error) {
-      setIsModalOpen(false);
-      setFormTitle('');
-      setFormDesc('');
-      fetchRoutines();
-    } else {
-      alert('Erro ao salvar no banco. Verifique suas variáveis VITE_SUPABASE no Vercel.');
+      if (!error) {
+        setIsModalOpen(false);
+        setFormTitle('');
+        setFormDesc('');
+        fetchRoutines();
+      } else {
+        throw error;
+      }
+    } catch (err: any) {
+      alert(`Erro ao salvar: ${err.message}`);
     }
   };
 
@@ -81,7 +88,7 @@ const RoutineManager: React.FC = () => {
                       <span className="flex items-center gap-1.5 text-[10px] font-black uppercase text-slate-400 bg-slate-50 px-2 py-1 rounded">
                         <Calendar size={12} /> {routine.frequency}
                       </span>
-                      {routine.requireGeo && (
+                      {routine.require_geo && (
                         <span className="flex items-center gap-1 bg-emerald-50 text-emerald-600 px-2 py-1 rounded text-[10px] font-bold" title="Requer GPS">
                           <MapPin size={12} /> GPS
                         </span>

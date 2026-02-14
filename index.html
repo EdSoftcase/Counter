@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -20,8 +21,14 @@
         .animate-slide-down { animation: slide-down 0.5s ease-out; }
     </style>
     <script>
-      // Definição global para evitar erros de referência antes da inicialização do Vite
-      window.process = { env: { API_KEY: "" } };
+      // Definição global para suportar o SDK do Gemini e o Supabase em ambiente de preview
+      window.process = { 
+        env: { 
+          API_KEY: "",
+          VITE_SUPABASE_URL: "https://xxgnqhanhehtfbxtcjtc.supabase.co",
+          VITE_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4Z25xaGFuaGVodGZieHRjanRjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5OTM4MDUsImV4cCI6MjA4NjU2OTgwNX0.OqTnMp3xvFQStud_uqYsvBMQEFqLuxshsCmPasJTwBU"
+        } 
+      };
     </script>
 <script type="importmap">
 {
@@ -34,7 +41,7 @@
     "recharts": "https://esm.sh/recharts@^3.7.0",
     "vite": "https://esm.sh/vite@^7.3.1",
     "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.4",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.95.3"
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.48.0"
   }
 }
 </script>

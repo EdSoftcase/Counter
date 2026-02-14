@@ -7,91 +7,61 @@ export enum UserRole {
 
 export type AppModule = 'dashboard' | 'timeclock' | 'routines' | 'execution' | 'users' | 'reports' | 'audit' | 'niches' | 'proposal' | 'validation' | 'database' | 'settings' | 'inventory';
 
+// Added Unit interface used in mockData.ts
+export interface Unit {
+  id: string;
+  company_id: string;
+  name: string;
+  address: string;
+}
+
 export interface User {
   id: string;
-  companyId: string;
+  // Added properties used in mockData.ts to fix property check errors
+  company_id?: string;
+  cpf?: string;
+  unit_id?: string;
+  role_name?: string;
+  permitted_modules?: (AppModule | string)[];
   name: string;
-  cpf: string;
-  role: UserRole;
-  unitId: string;
-  roleName: string;
-  permittedModules: AppModule[];
+  role: string | UserRole;
+  access_level?: string;
+  created_at?: string;
 }
 
 export type AdjustmentStatus = 'ORIGINAL' | 'PENDENTE' | 'APROVADO' | 'NEGADO';
 
 export interface TimeLog {
   id: string;
-  userId: string;
-  userName: string;
+  user_id: string;
   timestamp: string;
-  requestedTimestamp?: string;
-  type: 'ENTRADA' | 'SAIDA_INTERVALO' | 'RETORNO_INTERVALO' | 'SAIDA';
+  type: string;
   status: AdjustmentStatus;
-  location?: { lat: number; lng: number };
+  location?: any;
   hash: string;
-  photoUrl?: string;
-  reason?: string;
-  reviewedBy?: string;
-  reviewedAt?: string;
 }
 
 export interface StockItem {
   id: string;
   name: string;
-  unit: 'KG' | 'UN' | 'LT' | 'CX';
-  idealQuantity: number;
-  costPrice: number;
-  currentStock: number; 
-}
-
-export interface RecipeItem {
-  ingredientId: string;
-  quantity: number;
-}
-
-export interface SaleProduct {
-  id: string;
-  name: string;
-  recipe: RecipeItem[];
-}
-
-export interface DailySale {
-  productId: string;
-  quantity: number;
-}
-
-export enum OrderStatus {
-  PENDING = 'PENDENTE',
-  ORDERED = 'SOLICITADO',
-  RECEIVED = 'RECEBIDO'
-}
-
-export interface PurchaseOrder {
-  id: string;
-  itemId: string;
-  itemName: string;
-  quantity: number;
   unit: string;
-  status: OrderStatus;
-  orderedAt: string;
-  receivedAt?: string;
-  receivedBy?: string;
-  notes?: string;
+  ideal_quantity: number;
+  current_stock: number;
+  cost_price: number;
 }
 
 export interface Routine {
   id: string;
-  companyId: string;
+  // Added properties used in mockData.ts to fix property check errors
+  company_id?: string;
+  unit_id?: string;
+  is_stock_control?: boolean;
   title: string;
   description: string;
   frequency: Frequency;
-  unitId: string;
-  requirePhoto: boolean;
-  requireGeo: boolean;
+  require_photo: boolean;
+  require_geo: boolean;
   deadline: string;
-  isStockControl?: boolean;
-  stockItems?: StockItem[];
 }
 
 export enum Frequency {
@@ -100,42 +70,13 @@ export enum Frequency {
   MONTHLY = 'MENSAL'
 }
 
-export enum TaskStatus {
-  PENDING = 'PENDENTE',
-  COMPLETED = 'CONCLUIDO',
-  FAILED = 'FALHA'
-}
-
-export interface Unit {
+export interface TaskLog {
   id: string;
-  companyId: string;
-  name: string;
-  address: string;
-}
-
-export interface StockLog {
-  id: string;
-  unitId: string;
-  routineId: string;
-  executedBy: string;
-  executedAt: string;
-  photoUrl: string;
-  items: {
-    itemId: string;
-    itemName: string;
-    counted: number;
-    ideal: number;
-    unit: string;
-  }[];
-}
-
-export interface TaskInstance {
-  id: string;
-  routineId: string;
-  status: TaskStatus;
-  executedAt?: string;
-  executedBy?: string;
-  photoUrl?: string;
-  location?: { lat: number; lng: number };
-  stockMeasurements?: { itemId: string, currentQuantity: number }[];
+  routine_id: string;
+  executed_by_id?: string;
+  executed_by: string;
+  status: string;
+  evidence_url: string;
+  location?: any;
+  created_at: string;
 }

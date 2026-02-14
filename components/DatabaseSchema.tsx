@@ -1,89 +1,115 @@
 
-import React from 'react';
-import { Database, Table, Key, Link as LinkIcon } from 'lucide-react';
+import React, { useState } from 'react';
+import { Database, Table, Key, Link as LinkIcon, Info, Copy, Check, Terminal } from 'lucide-react';
 
 const DatabaseSchema: React.FC = () => {
-  const tables = [
-    {
-      name: 'Companies',
-      columns: [
-        { name: 'id', type: 'UUID', pk: true },
-        { name: 'name', type: 'String' },
-        { name: 'cnpj', type: 'String', unique: true },
-        { name: 'plan_id', type: 'FK', fk: 'Plans.id' }
-      ]
-    },
-    {
-      name: 'Units',
-      columns: [
-        { name: 'id', type: 'UUID', pk: true },
-        { name: 'company_id', type: 'FK', fk: 'Companies.id' },
-        { name: 'name', type: 'String' },
-        { name: 'location_data', type: 'JSON' }
-      ]
-    },
-    {
-      name: 'Routines',
-      columns: [
-        { name: 'id', type: 'UUID', pk: true },
-        { name: 'unit_id', type: 'FK', fk: 'Units.id' },
-        { name: 'title', type: 'String' },
-        { name: 'config', type: 'JSONB (Frequency, Flags)' }
-      ]
-    },
-    {
-      name: 'TaskLogs',
-      columns: [
-        { name: 'id', type: 'UUID', pk: true },
-        { name: 'routine_id', type: 'FK', fk: 'Routines.id' },
-        { name: 'executed_by', type: 'FK', fk: 'Users.id' },
-        { name: 'evidence_url', type: 'String' },
-        { name: 'timestamp', type: 'TIMESTAMPTZ' }
-      ]
-    }
-  ];
+  const [copied, setCopied] = useState(false);
+
+  const masterSQL = `-- 1. EXTENSÕES PARA UUID
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 2. TABELA DE PERFIS
+CREATE TABLE IF NOT EXISTS profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    role TEXT DEFAULT 'Operador',
+    access_level TEXT DEFAULT 'OPERATOR',
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 3. TABELA DE ROTINAS
+CREATE TABLE IF NOT EXISTS routines (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    frequency TEXT DEFAULT 'DIARIA',
+    deadline TEXT DEFAULT '12:00',
+    require_photo BOOLEAN DEFAULT true,
+    require_geo BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 4. TABELA DE PONTO
+CREATE TABLE IF NOT EXISTS time_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+    timestamp TIMESTAMPTZ DEFAULT now(),
+    type TEXT NOT NULL,
+    status TEXT DEFAULT 'ORIGINAL',
+    hash TEXT,
+    location JSONB,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 5. TABELA DE AUDITORIA
+CREATE TABLE IF NOT EXISTS task_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    routine_id UUID REFERENCES routines(id) ON DELETE CASCADE,
+    executed_by_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    executed_by TEXT,
+    status TEXT DEFAULT 'CONCLUIDO',
+    evidence_url TEXT,
+    location JSONB,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 6. TABELA DE INVENTÁRIO
+CREATE TABLE IF NOT EXISTS inventory_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    unit TEXT DEFAULT 'UN',
+    ideal_quantity NUMERIC DEFAULT 0,
+    current_stock NUMERIC DEFAULT 0,
+    cost_price NUMERIC DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);`;
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(masterSQL);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <Database className="text-emerald-500" /> Estrutura de Dados
+    <div className="space-y-10 pb-20 max-w-6xl mx-auto">
+      <header className="space-y-2">
+        <h2 className="text-4xl font-black text-slate-800 tracking-tight flex items-center gap-3">
+          <Database className="text-emerald-500" size={36} /> Arquitetura de Dados
         </h2>
-        <p className="text-slate-500">Arquitetura Multi-tenant otimizada para escalabilidade e auditoria imutável.</p>
+        <p className="text-slate-500">Esquema unificado para sincronização em tempo real via Supabase.</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {tables.map((table) => (
-          <div key={table.name} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="bg-slate-800 text-white px-4 py-2 flex items-center justify-between">
-              <span className="flex items-center gap-2 font-mono text-sm">
-                <Table size={14} className="text-emerald-400" />
-                {table.name}
-              </span>
-              <span className="text-[10px] text-slate-400 uppercase font-bold">SQL TABLE</span>
-            </div>
-            <div className="p-4 space-y-3">
-              {table.columns.map((col) => (
-                <div key={col.name} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    {col.pk ? <Key size={12} className="text-amber-500" /> : col.fk ? <LinkIcon size={12} className="text-blue-500" /> : <div className="w-3" />}
-                    <span className="font-mono text-slate-700">{col.name}</span>
-                  </div>
-                  <span className="text-xs text-slate-400 font-mono italic">{col.type}</span>
-                </div>
-              ))}
-            </div>
+      <section className="bg-slate-900 rounded-[2.5rem] overflow-hidden shadow-2xl">
+        <div className="px-8 py-5 flex items-center justify-between border-b border-white/5">
+          <div className="flex items-center gap-3">
+            <Terminal className="text-emerald-400" size={20} />
+            <span className="text-emerald-400 font-black text-xs uppercase tracking-widest">Master Schema SQL</span>
           </div>
-        ))}
-      </div>
-      
-      <div className="p-6 bg-slate-50 border border-slate-200 rounded-xl">
-        <h4 className="font-bold text-slate-800 mb-2">Conceitos de Engenharia</h4>
-        <ul className="text-sm text-slate-600 space-y-2 list-disc pl-5">
-          <li><strong>Logs Imutáveis:</strong> Toda execução de tarefa gera um hash único criptográfico para auditoria legal.</li>
-          <li><strong>Storage S3:</strong> Evidências fotográficas armazenadas com versionamento e acesso controlado via Signed URLs.</li>
-          <li><strong>Real-time Sync:</strong> WebSocket para notificações instantâneas de falha na execução crítica.</li>
-        </ul>
+          <button 
+            onClick={copyToClipboard}
+            className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-white text-[10px] font-black uppercase transition-all"
+          >
+            {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+            {copied ? 'Copiado!' : 'Copiar SQL'}
+          </button>
+        </div>
+        <div className="p-8">
+          <div className="bg-black/40 rounded-2xl p-6 font-mono text-[11px] text-emerald-400/70 overflow-x-auto custom-scrollbar whitespace-pre max-h-[400px]">
+            {masterSQL}
+          </div>
+        </div>
+      </section>
+
+      <div className="bg-amber-50 border border-amber-200 p-8 rounded-[2.5rem] flex items-start gap-6">
+        <div className="p-4 bg-white rounded-2xl shadow-sm text-amber-500 shrink-0">
+          <Info size={28} />
+        </div>
+        <div>
+          <h4 className="font-black text-amber-900 mb-2">Instruções de Resgate</h4>
+          <p className="text-amber-800/80 text-sm leading-relaxed">
+            Se encontrar erros de relação existente ou campos nulos, execute o script acima. O comando <code>IF NOT EXISTS</code> garante que tabelas com dados não sejam apagadas, enquanto <code>DEFAULT gen_random_uuid()</code> assegura que cada novo registro receba um ID único automaticamente.
+          </p>
+        </div>
       </div>
     </div>
   );
