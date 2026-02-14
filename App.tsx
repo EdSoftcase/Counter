@@ -15,14 +15,17 @@ import Reports from './components/Reports';
 import Login from './components/Login';
 import RoutineManager from './components/RoutineManager';
 import Inventory from './components/Inventory';
+import Compliance from './components/Compliance';
+import Finance from './components/Finance';
 import { UserRole } from './types';
-import { Bell, Search, Menu, Clock, CheckCircle2, ShieldCheck, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Bell, Search, Menu, Clock, CheckCircle2, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { isSupabaseConfigured } from './services/supabase';
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [userRole] = useState<UserRole>(UserRole.ADMIN);
+  const [userRole, setUserRole] = useState<UserRole>(UserRole.ADMIN);
+  const [userName, setUserName] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showConfigWarning, setShowConfigWarning] = useState(false);
 
@@ -37,6 +40,18 @@ const App: React.FC = () => {
     setIsSidebarOpen(false);
   };
 
+  const handleLogin = (role: UserRole, name: string) => {
+    setUserRole(role);
+    setUserName(name);
+    setIsLoggedIn(true);
+    // Funcionários começam na tela de Ponto ou Execução
+    if (role === UserRole.OPERATOR) {
+      setActiveTab('timeclock');
+    } else {
+      setActiveTab('dashboard');
+    }
+  };
+
   const handleLogout = () => {
     if (confirm("Deseja realmente sair do sistema?")) {
       setIsLoggedIn(false);
@@ -46,7 +61,7 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'dashboard': return <Dashboard />;
+      case 'dashboard': return <Dashboard userRole={userRole} userName={userName} />;
       case 'timeclock': return <TimeClock />;
       case 'execution': return <Execution />;
       case 'audit': return <Audit />;
@@ -59,21 +74,22 @@ const App: React.FC = () => {
       case 'reports': return <Reports />;
       case 'routines': return <RoutineManager />;
       case 'inventory': return <Inventory />;
-      default: return <Dashboard />;
+      case 'compliance': return <Compliance />;
+      case 'finance': return <Finance />;
+      default: return <Dashboard userRole={userRole} userName={userName} />;
     }
   };
 
   if (!isLoggedIn) {
-    return <Login onLogin={() => setIsLoggedIn(true)} />;
+    return <Login onLogin={handleLogin} />;
   }
 
   return (
     <div className="flex min-h-screen bg-slate-50 flex-col lg:flex-row">
-      {/* Banner de Erro de Configuração */}
       {showConfigWarning && (
         <div className="fixed top-0 left-0 right-0 bg-amber-500 text-white z-[100] px-4 py-2 flex items-center justify-center gap-3 shadow-lg animate-slide-down">
           <AlertTriangle size={18} />
-          <span className="text-sm font-bold">Configuração incompleta: Verifique suas chaves do Supabase no Vercel/Ambiente.</span>
+          <span className="text-sm font-bold">Configuração incompleta: Verifique suas chaves do Supabase.</span>
           <button onClick={() => setShowConfigWarning(false)} className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-bold transition-all">Fechar</button>
         </div>
       )}
@@ -115,9 +131,9 @@ const App: React.FC = () => {
           
           <div className="flex items-center gap-3 lg:gap-6">
             <div className="flex flex-col text-right hidden sm:flex">
-              <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Status da Rede</span>
+              <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest">{userRole} Logado</span>
               <span className={`text-xs font-bold flex items-center gap-1 justify-end ${isSupabaseConfigured ? 'text-emerald-600' : 'text-amber-500'}`}>
-                <ShieldCheck size={12} /> {isSupabaseConfigured ? 'Cloud Sync: Ativo' : 'Aguardando Configuração'}
+                <ShieldCheck size={12} /> {userName}
               </span>
             </div>
             
@@ -128,9 +144,9 @@ const App: React.FC = () => {
 
             <button 
               onClick={() => setActiveTab('settings')}
-              className="w-9 h-9 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner hover:scale-105 transition-transform"
+              className="w-9 h-9 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner hover:scale-105 transition-transform uppercase"
             >
-              RS
+              {userName.substring(0, 2)}
             </button>
           </div>
         </header>
@@ -139,7 +155,7 @@ const App: React.FC = () => {
           {renderContent()}
         </div>
 
-        {/* Footer Mobile */}
+        {/* Menu Mobile persistente para facilitar o uso por funcionários */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-2 flex justify-around items-center lg:hidden z-30 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
           <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-emerald-500' : 'text-slate-400'}`}>
             <Menu size={20} />
