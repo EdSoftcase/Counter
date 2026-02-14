@@ -1,33 +1,22 @@
 
 import React from 'react';
 import { 
-  LayoutDashboard, 
-  ClipboardList, 
-  CheckCircle2, 
-  ShieldCheck,
-  Zap,
-  CalendarCheck,
-  Database,
-  Clock,
-  Briefcase,
-  Settings,
-  LogOut,
-  Users,
-  BarChart3,
-  PackageSearch,
-  ShieldAlert,
-  Wallet
+  LayoutDashboard, ClipboardList, CheckCircle2, ShieldCheck, Zap,
+  CalendarCheck, Database, Clock, Briefcase, Settings, LogOut,
+  Users, BarChart3, PackageSearch, ShieldAlert, Wallet
 } from 'lucide-react';
+import { AppModule } from '../types';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   userRole: string;
+  permittedModules: (AppModule | string)[];
   onLogout: () => void;
   isOpen: boolean;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userRole, onLogout, isOpen }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userRole, permittedModules, onLogout, isOpen }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'SUPERVISOR'] },
     { id: 'timeclock', label: 'Registrar Ponto', icon: Clock, roles: ['ADMIN', 'SUPERVISOR', 'OPERATOR'] },
@@ -45,7 +34,12 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userRole, on
     { id: 'database', label: 'Arquitetura', icon: Database, roles: ['ADMIN'] },
   ];
 
-  const filteredItems = menuItems.filter(item => item.roles.includes(userRole));
+  // Filtra itens: 1. Por Role e 2. Se o ID está nos módulos permitidos (ou se é ADMIN total)
+  const filteredItems = menuItems.filter(item => {
+    const hasRoleAccess = item.roles.includes(userRole);
+    const hasModulePermission = userRole === 'ADMIN' || permittedModules.includes(item.id);
+    return hasRoleAccess && hasModulePermission;
+  });
 
   return (
     <div className={`
@@ -54,7 +48,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userRole, on
     `}>
       <div className="p-8 flex items-center justify-between border-b border-slate-800/50 mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center font-black text-2xl shadow-[0_0_20px_rgba(16,185,129,0.3)]">
+          <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center font-black text-2xl shadow-xl">
             C
           </div>
           <div>
@@ -73,7 +67,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userRole, on
               onClick={() => setActiveTab(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left group ${
                 activeTab === item.id 
-                  ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
+                  ? 'bg-emerald-500 text-white shadow-lg' 
                   : 'text-slate-400 hover:bg-slate-800 hover:text-white'
               }`}
             >
@@ -85,13 +79,6 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userRole, on
       </nav>
 
       <div className="p-4 border-t border-slate-800/50 mt-auto bg-slate-900/50 backdrop-blur-sm">
-        <button 
-          onClick={() => setActiveTab('settings')}
-          className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors mb-1 ${activeTab === 'settings' ? 'bg-emerald-500/10 text-emerald-400' : 'text-slate-400 hover:text-white'}`}
-        >
-          <Settings size={20} />
-          <span className="text-sm font-bold">Configurações</span>
-        </button>
         <button 
           onClick={onLogout}
           className="w-full flex items-center gap-3 px-4 py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition-all group"

@@ -1,11 +1,11 @@
 
 import React, { useState } from 'react';
-import { Lock, Mail, ArrowRight, User as UserIcon, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
-import { UserRole } from '../types';
+import { Lock, Mail, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { UserRole, AppModule } from '../types';
 import { supabase } from '../services/supabase';
 
 export interface LoginProps {
-  onLogin: (role: UserRole, name: string) => void;
+  onLogin: (role: UserRole, name: string, permittedModules: (AppModule | string)[]) => void;
 }
 
 export default function Login({ onLogin }: LoginProps) {
@@ -20,7 +20,6 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
 
     try {
-      // 1. Tentar buscar o usuário na tabela profiles (Login customizado por e-mail/senha)
       const { data, error: dbError } = await supabase
         .from('profiles')
         .select('*')
@@ -31,18 +30,24 @@ export default function Login({ onLogin }: LoginProps) {
       if (dbError) throw dbError;
 
       if (!data) {
-        // Fallback para login de emergência se o banco estiver vazio ou desconfigurado
+        // Fallback para login de emergência
         if (email === 'admin@counter.com.br' && password === '654321') {
-          return onLogin(UserRole.ADMIN, "Admin Geral (Offline Mode)");
+          return onLogin(UserRole.ADMIN, "Admin Geral", [
+            'dashboard', 'timeclock', 'routines', 'execution', 'inventory', 
+            'finance', 'compliance', 'users', 'reports', 'audit', 'database'
+          ]);
         }
-        throw new Error("Usuário ou senha incorretos. Verifique se você rodou o script na aba Arquitetura.");
+        throw new Error("Usuário ou senha incorretos.");
       }
 
-      // Login bem sucedido com dados do banco
-      onLogin(data.access_level as UserRole, data.name);
+      // Login bem sucedido: Envia Cargo, Nome e Módulos Autorizados
+      onLogin(
+        data.access_level as UserRole, 
+        data.name, 
+        data.permitted_modules || []
+      );
       
     } catch (err: any) {
-      console.error("Erro no Login:", err);
       setError(err.message || "Erro ao conectar com o servidor.");
     } finally {
       setLoading(false);
@@ -54,7 +59,7 @@ export default function Login({ onLogin }: LoginProps) {
       <div className="max-w-md w-full bg-white rounded-[3rem] p-12 shadow-2xl relative overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-2 bg-emerald-500"></div>
         <div className="text-center mb-10">
-          <div className="w-20 h-20 bg-emerald-500 rounded-3xl flex items-center justify-center font-black text-4xl text-white mx-auto mb-6 shadow-[0_20px_40px_rgba(16,185,129,0.3)]">
+          <div className="w-20 h-20 bg-emerald-500 rounded-3xl flex items-center justify-center font-black text-4xl text-white mx-auto mb-6 shadow-2xl">
             C
           </div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tighter">Counter Enterprise</h1>
@@ -109,10 +114,6 @@ export default function Login({ onLogin }: LoginProps) {
             {!loading && <ArrowRight size={20} />}
           </button>
         </form>
-        
-        <div className="mt-8 text-center">
-           <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Ambiente Monitorado e Seguro</p>
-        </div>
       </div>
     </div>
   );
