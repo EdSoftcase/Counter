@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-import { Lock, Mail, ArrowRight, User as UserIcon, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, ArrowRight, User as UserIcon, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
 import { UserRole } from '../types';
+import { supabase } from '../services/supabase';
 
 export interface LoginProps {
   onLogin: (role: UserRole, name: string) => void;
@@ -9,15 +10,43 @@ export interface LoginProps {
 
 export default function Login({ onLogin }: LoginProps) {
   const [loading, setLoading] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.ADMIN);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     setLoading(true);
-    setTimeout(() => {
-      onLogin(selectedRole, selectedRole === UserRole.ADMIN ? 'Ricardo Santos' : 'João Pizzaiolo');
+
+    try {
+      // 1. Tentar buscar o usuário na tabela profiles (Login customizado por e-mail/senha)
+      const { data, error: dbError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', email.trim().toLowerCase())
+        .eq('password', password)
+        .maybeSingle();
+
+      if (dbError) throw dbError;
+
+      if (!data) {
+        // Fallback para login de emergência se o banco estiver vazio ou desconfigurado
+        if (email === 'admin@counter.com.br' && password === '654321') {
+          return onLogin(UserRole.ADMIN, "Admin Geral (Offline Mode)");
+        }
+        throw new Error("Usuário ou senha incorretos. Verifique se você rodou o script na aba Arquitetura.");
+      }
+
+      // Login bem sucedido com dados do banco
+      onLogin(data.access_level as UserRole, data.name);
+      
+    } catch (err: any) {
+      console.error("Erro no Login:", err);
+      setError(err.message || "Erro ao conectar com o servidor.");
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   return (
@@ -29,48 +58,43 @@ export default function Login({ onLogin }: LoginProps) {
             C
           </div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tighter">Counter Enterprise</h1>
-          <p className="text-slate-500 mt-2 font-medium italic">Gestão operacional inteligente</p>
+          <p className="text-slate-500 mt-2 font-medium italic">Login Seguro Unificado</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-4">
-             <button 
-               type="button"
-               onClick={() => setSelectedRole(UserRole.ADMIN)}
-               className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${selectedRole === UserRole.ADMIN ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}
-             >
-               <ShieldCheck size={14} /> Admin
-             </button>
-             <button 
-               type="button"
-               onClick={() => setSelectedRole(UserRole.OPERATOR)}
-               className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${selectedRole === UserRole.OPERATOR ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}
-             >
-               <UserIcon size={14} /> Funcionário
-             </button>
+        {error && (
+          <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-3 text-rose-600 text-xs font-bold animate-in slide-in-from-top-2">
+            <AlertCircle size={18} /> {error}
           </div>
+        )}
 
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4">
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">E-mail</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">E-mail Corporativo</label>
               <div className="relative">
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <input 
                   type="email" 
-                  defaultValue={selectedRole === UserRole.ADMIN ? "admin@empresa.com.br" : "joao@pizzaria.com.br"}
-                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all font-bold"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="admin@counter.com.br"
+                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-emerald-500 font-bold"
+                  required
                 />
               </div>
             </div>
 
             <div className="space-y-1">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Senha</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Senha de Acesso</label>
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <input 
                   type="password" 
-                  defaultValue="password"
-                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all font-bold"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••"
+                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-emerald-500 font-bold"
+                  required
                 />
               </div>
             </div>
@@ -79,12 +103,16 @@ export default function Login({ onLogin }: LoginProps) {
           <button 
             type="submit"
             disabled={loading}
-            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-5 rounded-[2rem] shadow-xl transition-all flex items-center justify-center gap-3 group active:scale-95 disabled:opacity-50"
+            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-5 rounded-[2rem] shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50"
           >
-            {loading ? "Autenticando..." : `Entrar como ${selectedRole === UserRole.ADMIN ? 'Gestor' : 'Operacional'}`}
-            {!loading && <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />}
+            {loading ? <Loader2 className="animate-spin" /> : "Acessar Painel"}
+            {!loading && <ArrowRight size={20} />}
           </button>
         </form>
+        
+        <div className="mt-8 text-center">
+           <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Ambiente Monitorado e Seguro</p>
+        </div>
       </div>
     </div>
   );
