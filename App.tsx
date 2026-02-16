@@ -17,6 +17,8 @@ import RoutineManager from './components/RoutineManager';
 import Inventory from './components/Inventory';
 import Compliance from './components/Compliance';
 import Finance from './components/Finance';
+import CashRegister from './components/CashRegister';
+import POS from './components/POS';
 import { UserRole, AppModule } from './types';
 import { Bell, Search, Menu, Clock, CheckCircle2, ShieldCheck, AlertTriangle, Lock } from 'lucide-react';
 import { isSupabaseConfigured } from './services/supabase';
@@ -26,6 +28,7 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [userRole, setUserRole] = useState<UserRole>(UserRole.ADMIN);
   const [userName, setUserName] = useState('');
+  const [userId, setUserId] = useState(''); 
   const [permittedModules, setPermittedModules] = useState<(AppModule | string)[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showConfigWarning, setShowConfigWarning] = useState(false);
@@ -41,13 +44,13 @@ const App: React.FC = () => {
     setIsSidebarOpen(false);
   };
 
-  const handleLogin = (role: UserRole, name: string, modules: (AppModule | string)[]) => {
+  const handleLogin = (role: UserRole, name: string, modules: (AppModule | string)[], id?: string) => {
     setUserRole(role);
     setUserName(name);
+    setUserId(id || '');
     setPermittedModules(modules);
     setIsLoggedIn(true);
     
-    // Se o usuário não tem acesso ao dashboard, redireciona para o primeiro módulo que ele tem
     if (role !== UserRole.ADMIN && !modules.includes('dashboard')) {
       setActiveTab(modules[0] as string || 'timeclock');
     } else {
@@ -60,14 +63,16 @@ const App: React.FC = () => {
       setIsLoggedIn(false);
       setActiveTab('dashboard');
       setPermittedModules([]);
+      setUserId('');
     }
   };
 
   const renderContent = () => {
-    // PROTEÇÃO DE ACESSO: Se não for ADMIN e não estiver nos módulos permitidos, bloqueia
-    const isAllowed = userRole === UserRole.ADMIN || permittedModules.includes(activeTab as AppModule);
+    // Configurações e Dashboard são sempre permitidos para LoggedIn
+    const isAlwaysAllowed = activeTab === 'dashboard' || activeTab === 'settings';
+    const isAllowedByPermission = userRole === UserRole.ADMIN || permittedModules.includes(activeTab as AppModule);
 
-    if (!isAllowed && activeTab !== 'dashboard' && activeTab !== 'settings') {
+    if (!isAlwaysAllowed && !isAllowedByPermission) {
       return (
         <div className="flex flex-col items-center justify-center py-32 text-center space-y-6">
           <div className="w-24 h-24 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center shadow-inner">
@@ -84,6 +89,8 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case 'dashboard': return <Dashboard userRole={userRole} userName={userName} />;
+      case 'pos': return <POS userId={userId} userName={userName} onOpenCashier={() => setActiveTab('cash_register')} />;
+      case 'cash_register': return <CashRegister userRole={userRole} userId={userId} userName={userName} />;
       case 'timeclock': return <TimeClock />;
       case 'execution': return <Execution />;
       case 'audit': return <Audit />;
@@ -130,7 +137,7 @@ const App: React.FC = () => {
              <button onClick={() => setIsSidebarOpen(true)} className="p-2 lg:hidden text-slate-600 hover:bg-slate-100 rounded-lg">
                <Menu size={24} />
              </button>
-             <div className="relative max-w-xs w-full hidden md:block font-bold text-slate-400 text-sm">
+             <div className="relative max-w-xs w-full hidden md:block font-black text-slate-400 text-[10px] uppercase tracking-widest">
                Ambiente Enterprise Unificado
              </div>
           </div>
@@ -142,7 +149,7 @@ const App: React.FC = () => {
                 <ShieldCheck size={12} /> {userName}
               </span>
             </div>
-            <button onClick={() => setActiveTab('settings')} className="w-9 h-9 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner uppercase">
+            <button onClick={() => setActiveTab('settings')} className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-black text-xs shadow-inner uppercase hover:bg-indigo-100 transition-colors border border-indigo-100">
               {userName.substring(0, 2)}
             </button>
           </div>

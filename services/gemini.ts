@@ -15,8 +15,11 @@ export const getOperationalInsights = async (complianceData: any) => {
       `,
     });
     return response.text;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fetching AI insights:", error);
+    if (error.status === 429 || error.message?.includes('429') || error.message?.includes('quota')) {
+      return "IA indisponível temporariamente (Cota excedida). Tente novamente mais tarde.";
+    }
     return "Erro ao processar insights de IA.";
   }
 };
@@ -64,8 +67,11 @@ export const analyzeInventoryImage = async (base64Image: string, itemName?: stri
 
     const result = JSON.parse(response.text || '{"productName": "", "quantity": 0, "price": 0}');
     return result;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Erro na análise de imagem IA:", error);
+    if (error.status === 429 || error.message?.includes('429') || error.message?.includes('quota')) {
+       throw new Error("Limite de uso da IA excedido. Por favor, insira os dados manualmente ou tente mais tarde.");
+    }
     throw error;
   }
 };

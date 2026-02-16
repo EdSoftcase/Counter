@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Loader2, Edit3, Plus, Search, 
   CheckCircle2, Truck, Camera, X, Sparkles, Wand2, ArrowRight, ShoppingCart,
-  UtensilsCrossed, Beer, Hammer, AlertCircle, Package, DollarSign
+  UtensilsCrossed, Beer, Hammer, AlertCircle, Package, DollarSign,
+  FileBadge, Info
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { StockItem } from '../types';
@@ -17,6 +18,7 @@ const Inventory: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalTab, setModalTab] = useState<'BASIC' | 'FISCAL'>('BASIC');
   const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
   const [isQuickScanOpen, setIsQuickScanOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -32,7 +34,11 @@ const Inventory: React.FC = () => {
     category: 'PERECIVEIS' as any,
     ideal_quantity: 0,
     current_stock: 0,
-    cost_price: 0
+    cost_price: 0,
+    ncm: '21069090',
+    cfop: '5102',
+    tax_origin: 0,
+    cest: ''
   });
 
   const [receiveData, setReceiveData] = useState({
@@ -126,14 +132,11 @@ const Inventory: React.FC = () => {
         .limit(1);
 
       if (pendingTrans && pendingTrans.length > 0) {
-        // Atualiza a descrição para o gestor saber que a NF chegou
         await supabase.from('financial_transactions').update({
           amount: totalAmount,
           description: `COMPRA: ${targetItem.name} [NF RECEBIDA - AGUARDANDO PAGAMENTO]`,
-          // Mantemos PENDING para o gestor liquidar no financeiro depois
         }).eq('id', pendingTrans[0].id);
       } else {
-        // Se não havia provisão, cria uma conta a pagar já com NF recebida
         await supabase.from('financial_transactions').insert([{
           type: 'EXPENSE',
           category: 'INVENTORY',
@@ -159,7 +162,7 @@ const Inventory: React.FC = () => {
       setIsQuickScanOpen(false);
       setEvidencePhoto(null);
       fetchInventory();
-      alert("Mercadoria recebida! O estoque foi atualizado e a conta foi enviada para o Financeiro como 'Aguardando Pagamento'.");
+      alert("Mercadoria recebida e enviada ao financeiro!");
     } catch (err: any) {
       alert(`Erro: ${err.message}`);
     } finally {
@@ -180,8 +183,10 @@ const Inventory: React.FC = () => {
       const result = await analyzeInventoryImage(photo, undefined, itemNames);
       const matchedItem = insumos.find(i => i.name.toLowerCase().includes(result.productName.toLowerCase()));
       setQuickScanResult({ item: matchedItem || null, quantity: result.quantity, price: result.price });
-    } catch (err) { console.error(err); }
-    finally { setIsAnalyzingIA(false); }
+    } catch (err: any) { 
+      console.error(err);
+      alert(err.message || "Erro ao analisar imagem.");
+    } finally { setIsAnalyzingIA(false); }
   };
 
   const filteredItems = insumos.filter(item => {
@@ -214,13 +219,18 @@ const Inventory: React.FC = () => {
 
   const openEditModal = (item: StockItem) => {
     setEditingId(item.id);
+    setModalTab('BASIC');
     setFormData({
       name: item.name,
       unit: item.unit || 'UN',
       category: item.category || 'PERECIVEIS',
       ideal_quantity: item.ideal_quantity || 0,
       current_stock: item.current_stock || 0,
-      cost_price: item.cost_price || 0
+      cost_price: item.cost_price || 0,
+      ncm: (item as any).ncm || '21069090',
+      cfop: (item as any).cfop || '5102',
+      tax_origin: (item as any).tax_origin || 0,
+      cest: (item as any).cest || ''
     });
     setIsModalOpen(true);
   };
@@ -239,7 +249,7 @@ const Inventory: React.FC = () => {
           >
             <Sparkles size={20} /> Entrada por Foto (IA)
           </button>
-          <button onClick={() => { setEditingId(null); setFormData({name: '', unit: 'UN', category: activeCategory, ideal_quantity: 0, current_stock: 0, cost_price: 0}); setIsModalOpen(true); }} className="bg-slate-900 text-white px-6 py-4 rounded-2xl font-black flex items-center gap-2 shadow-xl hover:bg-slate-800 transition-all active:scale-95">
+          <button onClick={() => { setEditingId(null); setModalTab('BASIC'); setFormData({name: '', unit: 'UN', category: activeCategory, ideal_quantity: 0, current_stock: 0, cost_price: 0, ncm: '21069090', cfop: '5102', tax_origin: 0, cest: ''}); setIsModalOpen(true); }} className="bg-slate-900 text-white px-6 py-4 rounded-2xl font-black flex items-center gap-2 shadow-xl hover:bg-slate-800 transition-all active:scale-95">
             <Plus size={20} /> Novo Insumo
           </button>
         </div>
@@ -293,7 +303,7 @@ const Inventory: React.FC = () => {
                     <th className="px-10 py-6">Produto</th>
                     <th className="px-10 py-6">Qtd Padrão</th>
                     <th className="px-10 py-6">Saldo</th>
-                    <th className="px-10 py-6">Últ. Valor</th>
+                    <th className="px-10 py-6">Fiscal</th>
                     <th className="px-10 py-6 text-right">Ação</th>
                   </tr>
                 </thead>
@@ -312,15 +322,15 @@ const Inventory: React.FC = () => {
                           {item.current_stock}
                         </div>
                       </td>
-                      <td className="px-10 py-7 text-slate-500 font-bold">R$ {item.cost_price?.toFixed(2) || '0.00'}</td>
+                      <td className="px-10 py-7">
+                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 bg-slate-100 px-3 py-1 rounded-lg w-fit">
+                           <FileBadge size={12}/> {(item as any).ncm || 'Sem NCM'}
+                        </div>
+                      </td>
                       <td className="px-10 py-7 text-right">
                         <div className="flex justify-end gap-3">
-                           <button 
-                             onClick={() => handleToggleOrder(item)} 
-                             disabled={isSaving}
-                             className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all flex items-center gap-2 ${item.is_ordered ? 'bg-amber-100 text-amber-600' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
-                           >
-                             {isSaving ? <Loader2 className="animate-spin" size={14}/> : item.is_ordered ? <Truck size={14}/> : <ShoppingCart size={14}/>} 
+                           <button onClick={() => handleToggleOrder(item)} className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all flex items-center gap-2 ${item.is_ordered ? 'bg-amber-100 text-amber-600' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}>
+                             {item.is_ordered ? <Truck size={14}/> : <ShoppingCart size={14}/>} 
                              {item.is_ordered ? 'No Pedido' : 'Pedir'}
                            </button>
                            <button onClick={() => openEditModal(item)} className="p-3 text-slate-300 hover:text-slate-900"><Edit3 size={20} /></button>
@@ -342,69 +352,152 @@ const Inventory: React.FC = () => {
                    <h3 className="font-black text-slate-800 text-2xl tracking-tight">{item.name}</h3>
                    <p className="text-[10px] font-black text-slate-500 uppercase">Sugestão: {Math.max(0, item.ideal_quantity - item.current_stock)} {item.unit}</p>
                  </div>
-                 {item.is_ordered && (
-                   <div className="flex flex-col items-end">
-                     <Truck className="text-amber-500" size={24} />
-                     <span className="text-[8px] font-black text-amber-600 uppercase mt-1">Dívida Provisionada</span>
-                   </div>
-                 )}
+                 {item.is_ordered && <Truck className="text-amber-500" size={24} />}
                </div>
-               <button onClick={() => { setReceivingItem(item); setReceiveData({quantity: Math.max(0, item.ideal_quantity - item.current_stock), value: item.cost_price}); setIsReceiveModalOpen(true); }} className="w-full py-5 bg-indigo-500 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:bg-indigo-600 transition-all">Confirmar Recebimento de NF</button>
+               <button onClick={() => { setReceivingItem(item); setReceiveData({quantity: Math.max(0, item.ideal_quantity - item.current_stock), value: item.cost_price}); setIsReceiveModalOpen(true); }} className="w-full py-5 bg-indigo-500 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl">Receber Mercadoria</button>
             </div>
           ))}
-          {shoppingList.length === 0 && (
-            <div className="col-span-full py-20 text-center text-slate-400 font-black">Nenhum item em falta ou pedido pendente.</div>
-          )}
         </div>
       )}
 
-      {/* Modal Insumo */}
+      {/* Modal Insumo/Produto */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
-           <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl">
-             <div className="flex justify-between items-center mb-10">
+           <div className="bg-white w-full max-w-2xl rounded-[4rem] p-10 shadow-2xl overflow-hidden animate-in zoom-in-95">
+             <div className="flex justify-between items-center mb-8">
                 <h3 className="text-3xl font-black tracking-tight">{editingId ? 'Editar' : 'Novo'} Insumo</h3>
-                <button onClick={() => setIsModalOpen(false)} className="text-slate-400 p-2"><X size={32}/></button>
+                <button onClick={() => setIsModalOpen(false)} className="text-slate-400 p-2 hover:bg-slate-100 rounded-full"><X size={32}/></button>
              </div>
+
+             <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8 gap-1">
+                <button onClick={() => setModalTab('BASIC')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'BASIC' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Informações Básicas</button>
+                <button onClick={() => setModalTab('FISCAL')} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'FISCAL' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500'}`}>Dados Tributários (NFC-e)</button>
+             </div>
+
              <div className="space-y-6">
-                <input type="text" placeholder="Nome" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-6 bg-slate-50 rounded-[2rem] border font-black" />
-                <div className="grid grid-cols-3 gap-4">
-                  <input type="number" placeholder="Ideal" value={formData.ideal_quantity} onChange={e => setFormData({...formData, ideal_quantity: Number(e.target.value)})} className="w-full p-5 bg-slate-50 rounded-[1.5rem] border font-black text-center" />
-                  <input type="number" placeholder="Atual" value={formData.current_stock} onChange={e => setFormData({...formData, current_stock: Number(e.target.value)})} className="w-full p-5 bg-slate-50 rounded-[1.5rem] border font-black text-center" />
-                  <input type="number" placeholder="Preço" value={formData.cost_price} onChange={e => setFormData({...formData, cost_price: Number(e.target.value)})} className="w-full p-5 bg-slate-50 rounded-[1.5rem] border font-black text-center" />
+                {modalTab === 'BASIC' ? (
+                  <div className="space-y-6 animate-in slide-in-from-left-4">
+                    <div className="space-y-2">
+                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nome do Produto/Insumo</label>
+                       <input type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Qtd Ideal</label>
+                         <input type="number" value={formData.ideal_quantity} onChange={e => setFormData({...formData, ideal_quantity: Number(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center" />
+                      </div>
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Saldo Atual</label>
+                         <input type="number" value={formData.current_stock} onChange={e => setFormData({...formData, current_stock: Number(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center" />
+                      </div>
+                      <div className="space-y-2">
+                         <label className="text-[10px] font-black text-slate-400 uppercase ml-1">Custo Médio</label>
+                         <input type="number" value={formData.cost_price} onChange={e => setFormData({...formData, cost_price: Number(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center" />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-6 animate-in slide-in-from-right-4">
+                     <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 flex gap-3">
+                        <Info className="text-amber-500 shrink-0" size={20}/>
+                        <p className="text-[10px] text-amber-800 font-bold leading-tight">
+                          Códigos exigidos pela SEFAZ. Se não souber, peça auxílio à sua contabilidade ou use os padrões sugeridos pela IA Counter.
+                        </p>
+                     </div>
+                     <div className="grid grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">NCM (8 dígitos)</label>
+                          <input type="text" value={formData.ncm} onChange={e => setFormData({...formData, ncm: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">CFOP Padrão</label>
+                          <input type="text" value={formData.cfop} onChange={e => setFormData({...formData, cfop: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Código CEST (Opcional)</label>
+                          <input type="text" value={formData.cest} onChange={e => setFormData({...formData, cest: e.target.value})} placeholder="Ex: 1708700" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Origem da Mercadoria</label>
+                          <select value={formData.tax_origin} onChange={e => setFormData({...formData, tax_origin: Number(e.target.value)})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black">
+                             <option value={0}>0 - Nacional</option>
+                             <option value={1}>1 - Importada (Direta)</option>
+                             <option value={2}>2 - Importada (Mercado Interno)</option>
+                          </select>
+                        </div>
+                     </div>
+                  </div>
+                )}
+                
+                <div className="flex gap-4 pt-6 border-t">
+                   <button onClick={() => setIsModalOpen(false)} className="flex-1 py-5 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs">Descartar</button>
+                   <button onClick={handleSaveItem} disabled={isSaving} className="flex-1 py-5 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95">
+                     {isSaving ? <Loader2 className="animate-spin" /> : 'Confirmar Cadastro'}
+                   </button>
                 </div>
-                <button onClick={handleSaveItem} disabled={isSaving} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-[0.3em] text-xs">Confirmar Cadastro</button>
              </div>
            </div>
         </div>
       )}
 
-      {/* Modal Recebimento */}
-      {isReceiveModalOpen && receivingItem && (
+      {/* Quick Scan (IA) Modal - Reusando o componente já existente */}
+      {isQuickScanOpen && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
-          <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl">
-             <div className="flex justify-between items-center mb-8">
-               <h3 className="text-3xl font-black tracking-tight">Receber: {receivingItem.name}</h3>
-               <button onClick={() => setIsReceiveModalOpen(false)} className="text-slate-400 p-2"><X size={28}/></button>
-             </div>
-             <div className="space-y-6">
-                <div className="p-6 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-center gap-3">
-                  <AlertCircle className="text-indigo-600" />
-                  <p className="text-xs font-bold text-indigo-800">Ao confirmar, o estoque sobe agora, mas a despesa ficará pendente no financeiro para o gestor pagar depois.</p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Quantidade Recebida</label>
-                    <input type="number" value={receiveData.quantity} onChange={e => setReceiveData({...receiveData, quantity: Number(e.target.value)})} className="w-full p-6 bg-slate-50 rounded-[1.5rem] font-black text-center" />
+           <div className="bg-white w-full max-w-xl rounded-[4rem] p-12 shadow-2xl relative overflow-hidden">
+              <div className="flex justify-between items-center mb-8">
+                 <h3 className="text-3xl font-black tracking-tight">Leitura de Nota Fiscal</h3>
+                 <button onClick={() => setIsQuickScanOpen(false)} className="text-slate-400 p-2"><X size={28}/></button>
+              </div>
+
+              {isAnalyzingIA ? (
+                <div className="py-20 flex flex-col items-center justify-center gap-6 text-center">
+                  <div className="relative">
+                    <div className="w-20 h-20 bg-indigo-500 rounded-full animate-ping opacity-20 absolute inset-0"></div>
+                    <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center relative z-10 shadow-xl">
+                      <Sparkles size={32} className="animate-pulse" />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Preço Pago Un.</label>
-                    <input type="number" value={receiveData.value} onChange={e => setReceiveData({...receiveData, value: Number(e.target.value)})} className="w-full p-6 bg-slate-50 rounded-[1.5rem] font-black text-center" />
+                  <div>
+                    <h4 className="font-black text-slate-800 text-xl">Analisando Imagem...</h4>
+                    <p className="text-slate-400 font-bold text-xs mt-1">Nossa IA está lendo a nota fiscal.</p>
                   </div>
                 </div>
-                <button onClick={handleReceiveConfirm} disabled={isSaving} className="w-full py-6 bg-indigo-600 text-white rounded-[2rem] font-black uppercase text-xs shadow-xl active:scale-95 transition-all">Confirmar Chegada de Mercadoria</button>
-             </div>
-          </div>
+              ) : !evidencePhoto ? (
+                <div className="py-12 flex flex-col items-center gap-6">
+                  <div onClick={() => simulateCamera(true)} className="w-full h-64 border-4 border-dashed border-slate-200 rounded-[3rem] flex flex-col items-center justify-center gap-4 text-slate-400 hover:border-indigo-400 hover:text-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer group">
+                    <Camera size={64} className="group-hover:scale-110 transition-transform" />
+                    <span className="font-black uppercase text-xs tracking-widest">Tirar Foto da NF ou Produto</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6 animate-in slide-in-from-bottom">
+                   <div className="w-full h-48 bg-slate-100 rounded-[2.5rem] overflow-hidden relative border border-slate-200">
+                      <img src={evidencePhoto} alt="Evidence" className="w-full h-full object-cover opacity-80" />
+                   </div>
+
+                   {quickScanResult.item ? (
+                     <div className="bg-emerald-50 p-6 rounded-[2.5rem] border border-emerald-100 text-center">
+                        <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Produto Identificado</p>
+                        <h3 className="font-black text-emerald-900 text-xl">{quickScanResult.item.name}</h3>
+                     </div>
+                   ) : (
+                     <div className="bg-amber-50 p-6 rounded-[2.5rem] border border-amber-100 text-center">
+                        <AlertCircle className="mx-auto text-amber-500 mb-2" size={24} />
+                        <p className="font-black text-amber-800 text-sm">Produto não encontrado.</p>
+                     </div>
+                   )}
+                   
+                   <div className="grid grid-cols-2 gap-4">
+                      <input type="number" value={quickScanResult.quantity} onChange={(e) => setQuickScanResult({...quickScanResult, quantity: Number(e.target.value)})} className="w-full p-6 bg-slate-50 rounded-[1.5rem] font-black text-center text-lg" placeholder="Qtd" />
+                      <input type="number" value={quickScanResult.price} onChange={(e) => setQuickScanResult({...quickScanResult, price: Number(e.target.value)})} className="w-full p-6 bg-slate-50 rounded-[1.5rem] font-black text-center text-lg" placeholder="Preço" />
+                   </div>
+
+                   {quickScanResult.item && (
+                      <button onClick={handleReceiveConfirm} disabled={isSaving} className="w-full py-6 bg-emerald-600 text-white rounded-[2rem] font-black uppercase text-xs shadow-xl">Confirmar Entrada</button>
+                   )}
+                </div>
+              )}
+           </div>
         </div>
       )}
     </div>

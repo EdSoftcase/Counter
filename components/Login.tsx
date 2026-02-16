@@ -5,7 +5,7 @@ import { UserRole, AppModule } from '../types';
 import { supabase } from '../services/supabase';
 
 export interface LoginProps {
-  onLogin: (role: UserRole, name: string, permittedModules: (AppModule | string)[]) => void;
+  onLogin: (role: UserRole, name: string, permittedModules: (AppModule | string)[], id?: string) => void;
 }
 
 export default function Login({ onLogin }: LoginProps) {
@@ -34,17 +34,19 @@ export default function Login({ onLogin }: LoginProps) {
         if (email === 'admin@counter.com.br' && password === '654321') {
           return onLogin(UserRole.ADMIN, "Admin Geral", [
             'dashboard', 'timeclock', 'routines', 'execution', 'inventory', 
-            'finance', 'compliance', 'users', 'reports', 'audit', 'database'
-          ]);
+            'finance', 'compliance', 'users', 'reports', 'audit', 'database',
+            'settings', 'pos', 'cash_register', 'niches', 'proposal', 'validation'
+          ], '00000000-0000-0000-0000-000000000001');
         }
         throw new Error("Usuário ou senha incorretos.");
       }
 
-      // Login bem sucedido: Envia Cargo, Nome e Módulos Autorizados
+      // Login bem sucedido: Envia Cargo, Nome, Módulos Autorizados e ID
       onLogin(
         data.access_level as UserRole, 
         data.name, 
-        data.permitted_modules || []
+        data.permitted_modules || [],
+        data.id
       );
       
     } catch (err: any) {
