@@ -4,7 +4,8 @@ import {
   Wallet, ArrowRight, DollarSign,
   History, CheckCircle2, Lock, Banknote, Coins, Loader2,
   ArrowUpCircle, ArrowDownCircle, Camera, EyeOff, Wifi, WifiOff, CloudSync, RefreshCw,
-  User, Store, Bike, ShoppingCart, TrendingUp, AlertTriangle, CreditCard, QrCode, Landmark, HelpCircle
+  User, Store, Bike, ShoppingCart, TrendingUp, AlertTriangle, CreditCard, QrCode, Landmark, HelpCircle,
+  ShieldCheck, ShieldAlert, MessageSquare, X, CheckSquare, Search
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { PaymentMethod, UserRole } from '../types';
@@ -30,6 +31,12 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
   const [sessionTransactions, setSessionTransactions] = useState<any[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   
+  // Auditoria (Admin)
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [contestingId, setContestingId] = useState<string | null>(null);
+  const [contestNotes, setContestNotes] = useState('');
+  const [isAdmin] = useState(userRole === UserRole.ADMIN || userRole === UserRole.SUPERVISOR);
+
   const [modalMode, setModalMode] = useState<'EXPENSE' | 'SUPPLY' | null>(null);
   const [formData, setFormData] = useState({ desc: '', val: 0, evidence: '' });
 
@@ -58,6 +65,9 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
       const interval = setInterval(fetchSessionTransactions, 10000);
       fetchSessionTransactions();
       return () => clearInterval(interval);
+    }
+    if (step === 'HISTORY' && isAdmin) {
+      fetchAuditLogs();
     }
   }, [step]);
 
@@ -110,6 +120,19 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
     } catch (err) { console.error(err); }
   };
 
+  const fetchAuditLogs = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('cash_audits')
+        .select('*')
+        .order('date', { ascending: false })
+        .limit(30);
+      if (data) setAuditLogs(data);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
+  };
+
   const handleOpenRegister = () => {
     if (userAlreadyClosed) return alert("O caixa de hoje já foi encerrado.");
     setStep('ACTIVE');
@@ -151,17 +174,15 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
       .filter(t => t.type === 'EXPENSE' && (t.description.includes('CAIXA:') || t.description.includes('SANGUIA')))
       .reduce((acc, t) => acc + t.amount, 0);
 
-    // Soma detalhada com busca insensível
     const getSum = (tags: string[]) => pdvTransactions
       .filter(t => tags.some(tag => t.description.toLowerCase().includes(tag.toLowerCase())))
       .reduce((acc, t) => acc + t.amount, 0);
 
-    const cashSales = getSum(['CASH', 'Dinheiro']);
+    const cashSales = getSum(['CASH', 'Dinheiro', 'DINHEIRO']);
     const pixSales = getSum(['PIX']);
-    const creditSales = getSum(['CREDIT', 'Crédito']);
-    const debitSales = getSum(['DEBIT', 'Débito']);
+    const creditSales = getSum(['CREDIT', 'Crédito', 'CREDITO']);
+    const debitSales = getSum(['DEBIT', 'Débito', 'DEBITO']);
     
-    // Identifica vendas que caíram no "Total Geral" mas não em nenhuma categoria específica
     const sumCategorized = cashSales + pixSales + creditSales + debitSales;
     const uncategorizedSales = Math.max(0, systemCalculatedTotal - sumCategorized);
 
@@ -193,6 +214,27 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
       setUserAlreadyClosed(true);
     } catch (err: any) { alert(err.message); }
     finally { setLoading(false); }
+  };
+
+  const handleConferAudit = async (id: string) => {
+    if (!confirm("Confirmar a conferência deste caixa?")) return;
+    try {
+      await supabase.from('cash_audits').update({ status: 'APPROVED', audited_by: userName }).eq('id', id);
+      fetchAuditLogs();
+    } catch (err) { console.error(err); }
+  };
+
+  const handleContestAudit = async () => {
+    if (!contestNotes) return alert("Descreva o motivo da contestação.");
+    try {
+      await supabase.from('cash_audits').update({ 
+        status: 'CONTESTED', 
+        notes: `CONTESTADO por ${userName}: ${contestNotes}` 
+      }).eq('id', contestingId);
+      setContestingId(null);
+      setContestNotes('');
+      fetchAuditLogs();
+    } catch (err) { console.error(err); }
   };
 
   const renderOpen = () => (
@@ -473,6 +515,128 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
     );
   };
 
+  const renderHistory = () => (
+    <div className="space-y-8 animate-in fade-in">
+       {!isAdmin ? (
+         <div className="text-center py-32 opacity-30 flex flex-col items-center gap-4 bg-white rounded-[4rem] border border-dashed">
+            <History size={64}/>
+            <p className="font-black uppercase tracking-widest text-xs">Apenas Administradores podem visualizar o histórico consolidado.</p>
+         </div>
+       ) : (
+         <div className="grid grid-cols-1 gap-6">
+            <header className="flex justify-between items-center px-4">
+               <h3 className="font-black text-2xl text-slate-800 flex items-center gap-3"><ShieldCheck className="text-indigo-600" /> Auditoria de Fechamentos</h3>
+               <div className="flex gap-2">
+                  <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border">
+                    <Search size={14} className="text-slate-400" />
+                    <input type="text" placeholder="Filtrar operador..." className="text-xs font-bold outline-none" />
+                  </div>
+               </div>
+            </header>
+
+            <div className="bg-white border border-slate-200 rounded-[3rem] overflow-hidden shadow-sm">
+               <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                     <thead className="bg-slate-50 border-b text-[10px] font-black uppercase text-slate-400">
+                        <tr>
+                           <th className="px-10 py-6">Data</th>
+                           <th className="px-10 py-6">Operador</th>
+                           <th className="px-10 py-6">Furo de Caixa</th>
+                           <th className="px-10 py-6">Status</th>
+                           <th className="px-10 py-6 text-right">Ações de Gestão</th>
+                        </tr>
+                     </thead>
+                     <tbody className="divide-y">
+                        {auditLogs.map(log => (
+                          <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                             <td className="px-10 py-6 font-bold">{new Date(log.date).toLocaleDateString()}</td>
+                             <td className="px-10 py-6">
+                                <div className="flex items-center gap-2">
+                                   <User size={14} className="text-slate-400" />
+                                   <span className="font-black text-sm uppercase tracking-tight">{log.audited_by}</span>
+                                </div>
+                             </td>
+                             <td className="px-10 py-6">
+                                <span className={`font-black text-sm ${log.difference_value === 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                                   R$ {log.difference_value.toFixed(2)}
+                                </span>
+                             </td>
+                             <td className="px-10 py-6">
+                                <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                                  log.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : 
+                                  log.status === 'CONTESTED' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                   {log.status === 'APPROVED' ? 'Conferido' : log.status === 'CONTESTED' ? 'Contestado' : 'Pendente'}
+                                </span>
+                             </td>
+                             <td className="px-10 py-6 text-right">
+                                <div className="flex justify-end gap-2">
+                                   {log.status === 'PENDING' && (
+                                     <>
+                                       <button 
+                                         onClick={() => handleConferAudit(log.id)}
+                                         className="flex items-center gap-2 bg-emerald-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-all"
+                                       >
+                                         <CheckSquare size={14} /> Conferir
+                                       </button>
+                                       <button 
+                                         onClick={() => setContestingId(log.id)}
+                                         className="flex items-center gap-2 bg-rose-50 text-rose-600 border border-rose-100 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-rose-100 transition-all"
+                                       >
+                                         <ShieldAlert size={14} /> Contestar
+                                       </button>
+                                     </>
+                                   )}
+                                   <button className="p-2 text-slate-300 hover:text-indigo-600" title="Ver Comprovantes"><Camera size={18}/></button>
+                                </div>
+                             </td>
+                          </tr>
+                        ))}
+                        {auditLogs.length === 0 && (
+                          <tr><td colSpan={5} className="py-20 text-center font-black text-slate-300 uppercase tracking-widest text-xs">Nenhum log de auditoria encontrado.</td></tr>
+                        )}
+                     </tbody>
+                  </table>
+               </div>
+            </div>
+         </div>
+       )}
+
+       {/* Modal de Contestação */}
+       {contestingId && (
+         <div className="fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-lg rounded-[3rem] p-12 shadow-2xl animate-in zoom-in-95">
+               <div className="flex justify-between items-center mb-8">
+                  <h3 className="text-2xl font-black text-slate-800 tracking-tight">Contestar Fechamento</h3>
+                  <button onClick={() => { setContestingId(null); setContestNotes(''); }}><X size={24} className="text-slate-400" /></button>
+               </div>
+               <div className="space-y-6">
+                  <div className="bg-rose-50 p-6 rounded-2xl border border-rose-100 flex gap-4">
+                     <ShieldAlert size={24} className="text-rose-500 shrink-0" />
+                     <p className="text-xs font-bold text-rose-800 leading-tight">Ao contestar, o operador será notificado sobre a falha no caixa para prestar esclarecimentos.</p>
+                  </div>
+                  <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Motivo da Falha / Observação</label>
+                     <textarea 
+                        value={contestNotes}
+                        onChange={e => setContestNotes(e.target.value)}
+                        placeholder="Ex: Diferença de R$ 50,00 não justificada em dinheiro. Falta comprovante de sangria..."
+                        className="w-full p-6 bg-slate-50 border rounded-[2rem] font-bold text-sm h-32 outline-none focus:ring-4 ring-rose-100"
+                     ></textarea>
+                  </div>
+                  <button 
+                    onClick={handleContestAudit}
+                    className="w-full py-5 bg-rose-600 text-white rounded-3xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95"
+                  >
+                    Confirmar Contestação
+                  </button>
+               </div>
+            </div>
+         </div>
+       )}
+    </div>
+  );
+
   return (
     <div className="pb-24">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-12">
@@ -485,19 +649,14 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
         </div>
         <div className="flex bg-white p-1 rounded-2xl border">
            <button onClick={() => setStep('OPEN')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase ${step === 'OPEN' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}>Caixa</button>
-           <button onClick={() => setStep('HISTORY')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase ${step === 'HISTORY' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}>Histórico</button>
+           <button onClick={() => setStep('HISTORY')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase ${step === 'HISTORY' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}>Auditoria</button>
         </div>
       </header>
 
       {step === 'OPEN' && renderOpen()}
       {step === 'ACTIVE' && renderActive()}
       {step === 'CLOSING' && renderClosing()}
-      {step === 'HISTORY' && (
-        <div className="text-center py-32 opacity-30 flex flex-col items-center gap-4 bg-white rounded-[4rem] border border-dashed">
-           <History size={64}/>
-           <p className="font-black uppercase tracking-widest text-xs">Relatórios consolidados disponíveis apenas no módulo Administrativo.</p>
-        </div>
-      )}
+      {step === 'HISTORY' && renderHistory()}
     </div>
   );
 };
