@@ -1,69 +1,18 @@
 
 import React, { useState } from 'react';
-import { Database, Check, Terminal, RefreshCcw, Info, Wrench, ShieldCheck, UserCheck, AlertTriangle, Copy, TerminalSquare } from 'lucide-react';
+import { Database, Check, ShieldCheck, Copy, TerminalSquare, AlertTriangle } from 'lucide-react';
 
 const DatabaseSchema: React.FC = () => {
-  const [copiedRepair, setCopiedRepair] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const repairSQL = `-- 🛡️ SCRIPT COMPLETO DE ESTRUTURA (v14 - NFC-e Ready + Fiscal)
--- RODE ESTE SCRIPT NO "SQL EDITOR" DO SUPABASE PARA ATUALIZAR O BANCO
+  const repairSQL = `-- 🛡️ SCRIPT DE ESTRUTURA ENTERPRISE (v15)
+-- RODE ESTE SCRIPT NO "SQL EDITOR" DO SUPABASE PARA CORRIGIR COLUNAS AUSENTES
 
--- 1. EXTENSÕES
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- 2. TABELA DE CONFIGURAÇÃO FISCAL (EMPRESA)
-CREATE TABLE IF NOT EXISTS public.company_configs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    cnpj TEXT UNIQUE NOT NULL,
-    ie TEXT, -- Inscrição Estadual
-    im TEXT, -- Inscrição Municipal
-    csc_token TEXT, -- Token CSC (SEFAZ)
-    csc_id TEXT, -- ID do CSC (ex: 000001)
-    environment TEXT DEFAULT 'homologation', -- homologation ou production
-    cert_pfx_base64 TEXT, -- Armazenamento base64 do certificado (em prod usar Storage seguro)
-    cert_password TEXT,
-    company_name TEXT NOT NULL,
-    address_json JSONB -- Rua, Número, Bairro, CEP, Cidade, UF
-);
-
--- 3. TABELA DE CLIENTES (CRM ATUALIZADA)
-CREATE TABLE IF NOT EXISTS public.customers (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    name TEXT NOT NULL,
-    phone TEXT UNIQUE NOT NULL,
-    cpf_cnpj TEXT UNIQUE, -- Adicionado para Notas Fiscais
-    address TEXT,
-    region TEXT,
-    notes TEXT
-);
-
--- 4. TABELAS DE PRODUTOS E ESTOQUE (FISCAL READY)
-ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS ncm TEXT DEFAULT '21069090';
-ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS cfop TEXT DEFAULT '5102';
-ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS tax_origin INTEGER DEFAULT 0;
-ALTER TABLE public.inventory_items ADD COLUMN IF NOT EXISTS cest TEXT;
-
--- 5. TABELA DE USUÁRIOS E PERFIS
-CREATE TABLE IF NOT EXISTS public.profiles (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    name TEXT,
-    email TEXT UNIQUE,
-    password TEXT,
-    role_name TEXT,
-    access_level TEXT,
-    company_id TEXT DEFAULT 'c1',
-    salary NUMERIC DEFAULT 0,
-    hire_date DATE DEFAULT CURRENT_DATE,
-    permitted_modules TEXT[]
-);
-
--- 6. TABELAS FINANCEIRAS (FISCAL READY)
+-- 1. TABELA FINANCEIRA (ADICIONAR COLUNAS FISCAIS SE NÃO EXISTIREM)
 CREATE TABLE IF NOT EXISTS public.financial_transactions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    type TEXT, -- INCOME, EXPENSE
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    type TEXT NOT NULL, -- INCOME, EXPENSE
     category TEXT, 
     description TEXT,
     amount NUMERIC DEFAULT 0,
@@ -71,17 +20,37 @@ CREATE TABLE IF NOT EXISTS public.financial_transactions (
     status TEXT DEFAULT 'PENDING', 
     supplier TEXT, 
     attachment_url TEXT,
-    -- Campos NFC-e
-    nf_key TEXT UNIQUE, -- Chave de 44 dígitos
-    nf_status TEXT, -- AUTHORIZED, REJECTED, CANCELLED
+    -- Campos NFC-e (Correção do Erro nf_key)
+    nf_key TEXT UNIQUE,
+    nf_status TEXT, 
     nf_pdf_url TEXT,
-    nf_xml_url TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    nf_xml_url TEXT
 );
 
+-- Garantir que as colunas existam caso a tabela já tenha sido criada anteriormente
+DO $$ 
+BEGIN 
+    BEGIN
+        ALTER TABLE public.financial_transactions ADD COLUMN nf_key TEXT UNIQUE;
+    EXCEPTION WHEN duplicate_column THEN END;
+    
+    BEGIN
+        ALTER TABLE public.financial_transactions ADD COLUMN nf_status TEXT;
+    EXCEPTION WHEN duplicate_column THEN END;
+
+    BEGIN
+        ALTER TABLE public.financial_transactions ADD COLUMN nf_pdf_url TEXT;
+    EXCEPTION WHEN duplicate_column THEN END;
+
+    BEGIN
+        ALTER TABLE public.financial_transactions ADD COLUMN nf_xml_url TEXT;
+    EXCEPTION WHEN duplicate_column THEN END;
+END $$;
+
+-- 2. TABELA DE AUDITORIA DE CAIXA
 CREATE TABLE IF NOT EXISTS public.cash_audits (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    date DATE UNIQUE, 
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    date DATE UNIQUE DEFAULT CURRENT_DATE, 
     status TEXT DEFAULT 'PENDING', 
     audited_by TEXT,
     notes TEXT,
@@ -90,31 +59,41 @@ CREATE TABLE IF NOT EXISTS public.cash_audits (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. SEGURANÇA E POLÍTICAS
-DO $$ 
-DECLARE
-    t_name TEXT;
-BEGIN
-    FOR t_name IN (SELECT table_name FROM information_schema.tables WHERE table_schema = 'public') LOOP
-        EXECUTE format('ALTER TABLE IF EXISTS public.%I DISABLE ROW LEVEL SECURITY', t_name);
-    END LOOP;
-END $$;
+-- 3. TABELA DE ITENS DE ESTOQUE
+CREATE TABLE IF NOT EXISTS public.inventory_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    unit TEXT DEFAULT 'UN',
+    category TEXT DEFAULT 'PERECIVEIS',
+    ideal_quantity NUMERIC DEFAULT 0,
+    current_stock NUMERIC DEFAULT 0,
+    cost_price NUMERIC DEFAULT 0,
+    is_ordered BOOLEAN DEFAULT FALSE,
+    ncm TEXT,
+    cfop TEXT,
+    tax_origin INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
 
-ALTER TABLE public.company_configs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "permissao_configs_v14" ON public.company_configs FOR ALL USING (true);
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "permissao_app_v14" ON public.profiles FOR ALL USING (true);
-ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "permissao_crm_v14" ON public.customers FOR ALL USING (true);
+-- 4. POLÍTICAS DE ACESSO (RLS)
 ALTER TABLE public.financial_transactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "permissao_finance_v14" ON public.financial_transactions FOR ALL USING (true);
+DROP POLICY IF EXISTS "permit_all_finance" ON public.financial_transactions;
+CREATE POLICY "permit_all_finance" ON public.financial_transactions FOR ALL USING (true);
+
+ALTER TABLE public.cash_audits ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "permit_all_audits" ON public.cash_audits;
+CREATE POLICY "permit_all_audits" ON public.cash_audits FOR ALL USING (true);
+
+ALTER TABLE public.inventory_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "permit_all_inventory" ON public.inventory_items;
+CREATE POLICY "permit_all_inventory" ON public.inventory_items FOR ALL USING (true);
 
 NOTIFY pgrst, 'reload schema';`;
 
-  const copyToClipboard = (text: string, setter: (v: boolean) => void) => {
-    navigator.clipboard.writeText(text);
-    setter(true);
-    setTimeout(() => setter(false), 2000);
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(repairSQL);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -123,7 +102,7 @@ NOTIFY pgrst, 'reload schema';`;
         <h2 className="text-4xl font-black text-slate-800 tracking-tight flex items-center gap-3">
           <Database className="text-indigo-600" size={36} /> Engenharia de Dados
         </h2>
-        <p className="text-slate-500 font-medium text-lg italic">Provisionamento do CRM e PDV com suporte Fiscal (NFC-e).</p>
+        <p className="text-slate-500 font-medium text-lg italic">Correção de schema e provisionamento de tabelas críticas.</p>
       </header>
 
       <div className="bg-slate-900 border-[8px] border-indigo-500/20 p-12 rounded-[4rem] shadow-2xl relative overflow-hidden group">
@@ -137,16 +116,14 @@ NOTIFY pgrst, 'reload schema';`;
               <TerminalSquare size={32} />
             </div>
             <div>
-              <h3 className="text-3xl font-black text-white tracking-tight">Script Full Stack v14</h3>
-              <p className="text-indigo-400 font-bold uppercase text-[10px] tracking-widest mt-1">Inclui Tabelas e Colunas de NFC-e.</p>
+              <h3 className="text-3xl font-black text-white tracking-tight">Script de Correção v15</h3>
+              <p className="text-indigo-400 font-bold uppercase text-[10px] tracking-widest mt-1">Cria as colunas nf_key e tabelas de estoque/caixa.</p>
             </div>
           </div>
 
-          <p className="text-slate-400 mb-8 max-w-xl font-medium">Este script prepara seu ambiente para armazenar dados de tributação e chaves de acesso de notas fiscais de consumidor.</p>
-
-          <button onClick={() => copyToClipboard(repairSQL, setCopiedRepair)} className={`flex items-center justify-center gap-3 px-10 py-6 rounded-[2.5rem] font-black uppercase text-xs transition-all shadow-2xl active:scale-95 ${copiedRepair ? 'bg-emerald-50 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
-            {copiedRepair ? <Check size={20} /> : <Copy size={20} />}
-            {copiedRepair ? 'Copiado! Cole no Supabase' : 'Copiar Script SQL'}
+          <button onClick={copyToClipboard} className={`flex items-center justify-center gap-3 px-10 py-6 rounded-[2.5rem] font-black uppercase text-xs transition-all shadow-2xl active:scale-95 ${copied ? 'bg-emerald-500 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
+            {copied ? <Check size={20} /> : <Copy size={20} />}
+            {copied ? 'Copiado! Cole no SQL Editor do Supabase' : 'Copiar Script SQL de Correção'}
           </button>
         </div>
       </div>
@@ -154,9 +131,9 @@ NOTIFY pgrst, 'reload schema';`;
       <div className="bg-amber-50 border-2 border-amber-100 p-8 rounded-[3rem] flex gap-6">
          <AlertTriangle size={32} className="text-amber-500 shrink-0" />
          <div className="space-y-2">
-            <h4 className="font-black text-amber-800 uppercase text-xs tracking-widest">Atenção para NFC-e</h4>
+            <h4 className="font-black text-amber-800 uppercase text-xs tracking-widest">Resolução do Erro nf_key</h4>
             <p className="text-sm text-amber-700 font-medium leading-relaxed">
-              Após rodar este script, você deverá cadastrar os dados da empresa (CNPJ, CSC e Certificado) na aba de Configurações para habilitar a mensageria fiscal com a SEFAZ.
+              O erro "Could not find the nf_key column" ocorre porque sua tabela no banco de dados ainda não possui este campo. Execute o script acima para adicionar os campos necessários para a emissão de notas e registros financeiros.
             </p>
          </div>
       </div>

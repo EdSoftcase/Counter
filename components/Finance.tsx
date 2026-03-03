@@ -546,7 +546,7 @@ const Finance: React.FC = () => {
                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                <Tooltip 
                  contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                 formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Saldo Projetado']}
+                 formatter={(value: any) => [`R$ ${Number(value).toFixed(2)}`, 'Saldo Projetado']}
                />
                <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
                <Area 
@@ -594,7 +594,7 @@ const Finance: React.FC = () => {
            </h3>
            <div className="space-y-8">
              {Object.keys(grouped).map(date => {
-                const dayTotal = grouped[date].reduce((acc, t) => acc + t.amount, 0);
+                const dayTotal = grouped[date].reduce((acc: number, t: FinancialTransaction) => acc + t.amount, 0);
                 const isToday = date === new Date().toISOString().split('T')[0];
                 return (
                   <div key={date} className="relative pl-8 border-l-2 border-slate-100">
@@ -607,7 +607,7 @@ const Finance: React.FC = () => {
                        <p className="text-xs font-bold text-slate-400 uppercase">Previsão de Entrada: <span className="text-emerald-600">R$ {dayTotal.toFixed(2)}</span></p>
                      </div>
                      <div className="space-y-2">
-                        {grouped[date].map(t => (
+                        {grouped[date].map((t: FinancialTransaction) => (
                           <div key={t.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:border-indigo-200 transition-colors">
                              <div className="flex items-center gap-3">
                                 <CreditCard size={16} className="text-slate-400"/>

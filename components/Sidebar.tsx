@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ClipboardList, CheckCircle2, ShieldCheck, Zap,
   CalendarCheck, Database, Clock, Briefcase, Settings as SettingsIcon, LogOut,
   Users, BarChart3, PackageSearch, ShieldAlert, Wallet, Calculator,
-  Store, ChevronRight
+  Store, ChevronRight, Monitor
 } from 'lucide-react';
 import { AppModule } from '../types';
 
@@ -26,6 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, userRole, pe
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'SUPERVISOR'] },
         { id: 'pos', label: 'Vendas & Salão', icon: Store, roles: ['ADMIN', 'SUPERVISOR', 'OPERATOR'] },
         { id: 'cash_register', label: 'Frente de Caixa', icon: Calculator, roles: ['ADMIN', 'SUPERVISOR', 'OPERATOR'] },
+        { id: 'self_service', label: 'Autoatendimento', icon: Monitor, roles: ['ADMIN', 'SUPERVISOR'] },
         { id: 'timeclock', label: 'Registrar Ponto', icon: Clock, roles: ['ADMIN', 'SUPERVISOR', 'OPERATOR'] },
         { id: 'execution', label: 'Executar Tarefas', icon: CheckCircle2, roles: ['ADMIN', 'SUPERVISOR', 'OPERATOR'] },
       ]

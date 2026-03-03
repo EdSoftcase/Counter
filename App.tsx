@@ -19,8 +19,9 @@ import Compliance from './components/Compliance';
 import Finance from './components/Finance';
 import CashRegister from './components/CashRegister';
 import POS from './components/POS';
+import PublicSelfService from './components/PublicSelfService';
 import { UserRole, AppModule } from './types';
-import { Bell, Search, Menu, Clock, CheckCircle2, ShieldCheck, AlertTriangle, Lock } from 'lucide-react';
+import { Bell, Search, Menu, Clock, CheckCircle2, ShieldCheck, AlertTriangle, Lock, Monitor } from 'lucide-react';
 import { isSupabaseConfigured } from './services/supabase';
 
 const App: React.FC = () => {
@@ -32,6 +33,7 @@ const App: React.FC = () => {
   const [permittedModules, setPermittedModules] = useState<(AppModule | string)[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showConfigWarning, setShowConfigWarning] = useState(false);
+  const [isKioskMode, setIsKioskMode] = useState(false);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -105,9 +107,30 @@ const App: React.FC = () => {
       case 'inventory': return <Inventory />;
       case 'compliance': return <Compliance />;
       case 'finance': return <Finance />;
+      case 'self_service': return (
+        <div className="flex flex-col items-center justify-center py-20 text-center space-y-8">
+          <div className="w-24 h-24 bg-indigo-50 text-indigo-600 rounded-[2rem] flex items-center justify-center shadow-inner">
+            <Monitor size={48} />
+          </div>
+          <div className="max-w-md">
+            <h3 className="text-2xl font-black text-slate-800">Modo Autoatendimento</h3>
+            <p className="text-slate-500 font-medium mt-2">Ative o modo totem para que seus clientes possam fazer pedidos diretamente. A barra lateral e o cabeçalho serão ocultados.</p>
+          </div>
+          <button 
+            onClick={() => setIsKioskMode(true)} 
+            className="bg-indigo-600 text-white px-10 py-4 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-colors"
+          >
+            Ativar Modo Totem
+          </button>
+        </div>
+      );
       default: return <Dashboard userRole={userRole} userName={userName} />;
     }
   };
+
+  if (isKioskMode) {
+    return <PublicSelfService onExit={() => setIsKioskMode(false)} userId={userId} />;
+  }
 
   if (!isLoggedIn) {
     return <Login onLogin={handleLogin} />;

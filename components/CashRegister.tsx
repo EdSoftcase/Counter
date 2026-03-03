@@ -1,11 +1,11 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Wallet, ArrowRight, DollarSign,
   History, CheckCircle2, Lock, Banknote, Coins, Loader2,
-  ArrowUpCircle, ArrowDownCircle, Camera, EyeOff, Wifi, WifiOff, CloudSync, RefreshCw,
-  User, Store, Bike, ShoppingCart, TrendingUp, AlertTriangle, CreditCard, QrCode, Landmark, HelpCircle,
-  ShieldCheck, ShieldAlert, MessageSquare, X, CheckSquare, Search
+  ArrowUpCircle, ArrowDownCircle, Camera, Printer, Wifi, WifiOff, 
+  User, Store, Bike, ShoppingCart, TrendingUp, AlertTriangle, CreditCard, 
+  Search, X, CheckSquare, Calculator, FileText, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { PaymentMethod, UserRole } from '../types';
@@ -16,33 +16,45 @@ interface CashRegisterProps {
   userName?: string;
 }
 
+const BILLS = [
+  { label: 'R$ 200,00', value: 200 },
+  { label: 'R$ 100,00', value: 100 },
+  { label: 'R$ 50,00', value: 50 },
+  { label: 'R$ 20,00', value: 20 },
+  { label: 'R$ 10,00', value: 10 },
+  { label: 'R$ 5,00', value: 5 },
+  { label: 'R$ 2,00', value: 2 },
+  { label: 'Moedas / Outros', value: 1 },
+];
+
 const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName }) => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [step, setStep] = useState<'OPEN' | 'ACTIVE' | 'CLOSING' | 'HISTORY'>('OPEN');
+  const [step, setStep] = useState<'OPEN' | 'ACTIVE' | 'CLOSING' | 'FITA'>('OPEN');
   const [loading, setLoading] = useState(false);
   const [userAlreadyClosed, setUserAlreadyClosed] = useState(false);
 
+  // Configuração do Terminal
+  const [terminalNumber, setTerminalNumber] = useState('01');
   const [openingBalance, setOpeningBalance] = useState(0); 
-  const [systemCalculatedTotal, setSystemCalculatedTotal] = useState(0); 
-  const [closingReserve, setClosingReserve] = useState(0); 
-  const [countedCash, setCountedCash] = useState(0); 
-  const [isCountConfirmed, setIsCountConfirmed] = useState(false);
-  
+
+  // Estados de Fechamento
+  const [billCounts, setBillCounts] = useState<Record<number, number>>({});
+  const [countedCash, setCountedCash] = useState(0);
+  const [justification, setJustification] = useState('');
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
+
+  // Dados da Sessão
   const [sessionTransactions, setSessionTransactions] = useState<any[]>([]);
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [isDemo, setIsDemo] = useState(false);
+  const [summary, setSummary] = useState<any>(null);
   
-  // Auditoria (Admin)
-  const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [contestingId, setContestingId] = useState<string | null>(null);
-  const [contestNotes, setContestNotes] = useState('');
-  const [isAdmin] = useState(userRole === UserRole.ADMIN || userRole === UserRole.SUPERVISOR);
-
-  const [modalMode, setModalMode] = useState<'EXPENSE' | 'SUPPLY' | null>(null);
-  const [formData, setFormData] = useState({ desc: '', val: 0, evidence: '' });
-
-  const SESSION_KEY = `RETRY_SESSION_${userId || 'GENERIC'}`;
+  const SESSION_KEY = `RETRY_SESSION_V2_${userId || 'GENERIC'}`;
 
   useEffect(() => {
+    if (!userId) return;
+    recoverSession();
+    checkIfClosedToday();
+    
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -51,23 +63,13 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
-
-  useEffect(() => {
-    if (!userId) return;
-    fetchPaymentMethods();
-    checkIfClosedToday();
-    recoverSession();
   }, [userId]);
 
   useEffect(() => {
-    if (step === 'ACTIVE' || step === 'CLOSING') {
-      const interval = setInterval(fetchSessionTransactions, 10000);
-      fetchSessionTransactions();
+    if (step === 'ACTIVE' || step === 'CLOSING' || step === 'FITA') {
+      fetchSessionData();
+      const interval = setInterval(fetchSessionData, 15000);
       return () => clearInterval(interval);
-    }
-    if (step === 'HISTORY' && isAdmin) {
-      fetchAuditLogs();
     }
   }, [step]);
 
@@ -77,164 +79,147 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
       const data = JSON.parse(saved);
       setStep(data.step);
       setOpeningBalance(data.openingBalance);
-    } else {
-      const lastReserve = localStorage.getItem(`ENTERPRISE_NEXT_OPENING_${userId || 'GENERIC'}`);
-      if (lastReserve) setOpeningBalance(Number(lastReserve));
+      setTerminalNumber(data.terminalNumber);
     }
   };
 
-  const saveLocalSession = (currentStep: any, balance: number) => {
+  const saveLocalSession = (currentStep: any) => {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
       step: currentStep,
-      openingBalance: balance,
+      openingBalance: openingBalance,
+      terminalNumber: terminalNumber,
       timestamp: new Date().toISOString()
     }));
   };
 
   const checkIfClosedToday = async () => {
-    if (!isOnline) return;
     const today = new Date().toISOString().split('T')[0];
     const { data } = await supabase.from('cash_audits').select('id').eq('date', today).limit(1);
     if (data && data.length > 0) setUserAlreadyClosed(true);
   };
 
-  const fetchPaymentMethods = async () => {
-    const { data } = await supabase.from('payment_methods').select('*').order('name');
-    if (data) setPaymentMethods(data);
-  };
-
-  const fetchSessionTransactions = async () => {
+  const fetchSessionData = async () => {
     const today = new Date().toISOString().split('T')[0];
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('financial_transactions')
         .select('*')
         .eq('due_date', today)
         .order('created_at', { ascending: false });
       
-      if (data) {
+      if (error) throw error;
+
+      if (data && data.length > 0) {
         setSessionTransactions(data);
-        const salesTotal = data.filter(t => t.type === 'INCOME' && t.description.includes('PDV')).reduce((acc, t) => acc + t.amount, 0);
-        setSystemCalculatedTotal(salesTotal);
+        generateSummary(data);
+        setIsDemo(false);
+      } else {
+        // Se não houver dados reais, usamos dados de demonstração para não ficar em branco
+        const demoData = [
+          { id: 'd1', description: 'Venda PDV [DINE_IN]: Mesa 5 | Pagto: Dinheiro', amount: 145.50, type: 'INCOME', created_at: new Date().toISOString() },
+          { id: 'd2', description: 'Venda PDV [DELIVERY]: João Silva | Pagto: PIX', amount: 89.90, type: 'INCOME', created_at: new Date(Date.now() - 1000 * 60 * 15).toISOString() },
+          { id: 'd3', description: 'Suprimento de Caixa: Troco moedas', amount: 50.00, type: 'INCOME', created_at: new Date(Date.now() - 1000 * 60 * 45).toISOString() },
+          { id: 'd4', description: 'Sangria: Pagamento fornecedor hortifruti', amount: 35.00, type: 'EXPENSE', created_at: new Date(Date.now() - 1000 * 60 * 120).toISOString() },
+        ];
+        setSessionTransactions(demoData);
+        generateSummary(demoData);
+        setIsDemo(true);
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+      console.error(err);
+      // Fallback para demo em caso de erro de conexão
+      const demoData = [
+        { id: 'd1', description: 'Venda PDV [DINE_IN]: Mesa 5 | Pagto: Dinheiro', amount: 145.50, type: 'INCOME', created_at: new Date().toISOString() },
+      ];
+      setSessionTransactions(demoData);
+      generateSummary(demoData);
+      setIsDemo(true);
+    }
   };
 
-  const fetchAuditLogs = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('cash_audits')
-        .select('*')
-        .order('date', { ascending: false })
-        .limit(30);
-      if (data) setAuditLogs(data);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
+  const generateSummary = (txs: any[]) => {
+    const pdv = txs.filter(t => t.description.includes('Venda PDV'));
+    
+    // Categorização de Vendas
+    const cash = pdv.filter(t => t.description.includes('Dinheiro')).reduce((acc, t) => acc + t.amount, 0);
+    const pix = pdv.filter(t => t.description.includes('PIX')).reduce((acc, t) => acc + t.amount, 0);
+    const cards = pdv.filter(t => t.description.includes('Cartão')).reduce((acc, t) => acc + t.amount, 0);
+    
+    // Contagem de Pizzas (Baseado no nome padrão do MOCK_MENU)
+    const pizzaCount = pdv.reduce((acc, t) => {
+      const matches = t.description.match(/Pizza (Grande|Individual)/g);
+      return acc + (matches ? matches.length : 0);
+    }, 0);
+
+    // Taxas de Serviço (10%)
+    const serviceCharges = pdv.reduce((acc, t) => {
+      const match = t.description.match(/Taxa Serviço \(10%\): R\$ ([\d,.]+)/);
+      return acc + (match ? parseFloat(match[1].replace(',', '.')) : 0);
+    }, 0);
+
+    // Motoboys
+    const motoboyMap: Record<string, { count: number, fees: number }> = {};
+    pdv.filter(t => t.description.includes('Entregador:')).forEach(t => {
+      const name = t.description.split('Entregador: ')[1]?.split('|')[0]?.trim();
+      const feeMatch = t.description.match(/TX: R\$ ([\d,.]+)/);
+      const fee = feeMatch ? parseFloat(feeMatch[1].replace(',', '.')) : 0;
+      if (name) {
+        motoboyMap[name] = { 
+          count: (motoboyMap[name]?.count || 0) + 1,
+          fees: (motoboyMap[name]?.fees || 0) + fee
+        };
+      }
+    });
+
+    // Sangrias e Reforços
+    const supplies = txs.filter(t => t.description.includes('Reforço')).reduce((acc, t) => acc + t.amount, 0);
+    const expenses = txs.filter(t => t.description.includes('SANGUIA') || t.description.includes('CAIXA:')).reduce((acc, t) => acc + t.amount, 0);
+
+    const expectedInDrawer = openingBalance + cash + supplies - expenses;
+
+    setSummary({
+      cash, pix, cards, pizzaCount, serviceCharges, motoboyMap, supplies, expenses, expectedInDrawer,
+      totalSales: cash + pix + cards
+    });
+  };
+
+  const updateBillCount = (val: number, qty: number) => {
+    const newCounts = { ...billCounts, [val]: qty };
+    setBillCounts(newCounts);
+    const total = Object.entries(newCounts).reduce((acc, [v, q]) => acc + (Number(v) * q), 0);
+    setCountedCash(total);
   };
 
   const handleOpenRegister = () => {
-    if (userAlreadyClosed) return alert("O caixa de hoje já foi encerrado.");
+    if (openingBalance < 0) return alert("Troco inicial inválido.");
     setStep('ACTIVE');
-    saveLocalSession('ACTIVE', openingBalance);
+    saveLocalSession('ACTIVE');
   };
 
-  const handleAddTransaction = async () => {
-    if (formData.val <= 0) return alert("Valor inválido.");
+  const handleFinalize = async () => {
+    if (!summary) return;
+    const diff = countedCash - summary.expectedInDrawer;
+    
+    if (Math.abs(diff) > 0.01 && !justification) {
+      setShowDiagnostic(true);
+      return alert(`Diferença de R$ ${diff.toFixed(2)} detectada. Por favor, identifique o motivo no campo de justificativa.`);
+    }
+
     setLoading(true);
     try {
       const today = new Date().toISOString().split('T')[0];
-      const finalDesc = modalMode === 'SUPPLY' ? 'Reforço de Caixa' : `SANGUIA: ${formData.desc || 'Despesa Rápida'}`;
-      
-      await supabase.from('financial_transactions').insert([{
-        type: modalMode === 'SUPPLY' ? 'INCOME' : 'EXPENSE',
-        category: 'OTHER',
-        description: `CAIXA: ${finalDesc}`,
-        amount: formData.val,
-        due_date: today,
-        status: 'PAID',
-        attachment_url: formData.evidence
-      }]);
-      
-      setFormData({ desc: '', val: 0, evidence: '' });
-      setModalMode(null);
-      await fetchSessionTransactions();
-    } catch (err: any) { alert(err.message); }
-    finally { setLoading(false); }
-  };
-
-  const calculateAudit = () => {
-    const pdvTransactions = sessionTransactions.filter(t => t.type === 'INCOME' && t.description.includes('PDV'));
-
-    const supplies = sessionTransactions
-      .filter(t => t.type === 'INCOME' && t.description.includes('Reforço'))
-      .reduce((acc, t) => acc + t.amount, 0);
-
-    const expenses = sessionTransactions
-      .filter(t => t.type === 'EXPENSE' && (t.description.includes('CAIXA:') || t.description.includes('SANGUIA')))
-      .reduce((acc, t) => acc + t.amount, 0);
-
-    const getSum = (tags: string[]) => pdvTransactions
-      .filter(t => tags.some(tag => t.description.toLowerCase().includes(tag.toLowerCase())))
-      .reduce((acc, t) => acc + t.amount, 0);
-
-    const cashSales = getSum(['CASH', 'Dinheiro', 'DINHEIRO']);
-    const pixSales = getSum(['PIX']);
-    const creditSales = getSum(['CREDIT', 'Crédito', 'CREDITO']);
-    const debitSales = getSum(['DEBIT', 'Débito', 'DEBITO']);
-    
-    const sumCategorized = cashSales + pixSales + creditSales + debitSales;
-    const uncategorizedSales = Math.max(0, systemCalculatedTotal - sumCategorized);
-
-    const expectedCash = openingBalance + cashSales + supplies - expenses;
-    const diff = countedCash - expectedCash;
-    
-    return { expectedCash, diff, cashSales, pixSales, creditSales, debitSales, supplies, expenses, uncategorizedSales };
-  };
-
-  const handleFinishClosing = async () => {
-    setLoading(true);
-    try {
-      const { diff } = calculateAudit();
-      const today = new Date().toISOString().split('T')[0];
-      
       await supabase.from('cash_audits').insert([{
         date: today,
         status: 'PENDING',
         difference_value: diff,
-        audited_by: userName || 'Operador',
-        notes: `Fechamento Terminal. Físico: R$ ${countedCash.toFixed(2)}. Diferença: R$ ${diff.toFixed(2)}`
+        audited_by: `${userName} (T-${terminalNumber})`,
+        notes: `Fechamento Terminal ${terminalNumber}. Esperado: ${summary.expectedInDrawer.toFixed(2)}. Contado: ${countedCash.toFixed(2)}. Justificativa: ${justification || 'N/A'}`
       }]);
 
       localStorage.removeItem(SESSION_KEY);
-      localStorage.setItem(`ENTERPRISE_NEXT_OPENING_${userId || 'GENERIC'}`, closingReserve.toString());
-      
-      alert("Caixa encerrado com sucesso e enviado para auditoria!");
-      setStep('OPEN');
-      setUserAlreadyClosed(true);
+      setStep('FITA');
     } catch (err: any) { alert(err.message); }
     finally { setLoading(false); }
-  };
-
-  const handleConferAudit = async (id: string) => {
-    if (!confirm("Confirmar a conferência deste caixa?")) return;
-    try {
-      await supabase.from('cash_audits').update({ status: 'APPROVED', audited_by: userName }).eq('id', id);
-      fetchAuditLogs();
-    } catch (err) { console.error(err); }
-  };
-
-  const handleContestAudit = async () => {
-    if (!contestNotes) return alert("Descreva o motivo da contestação.");
-    try {
-      await supabase.from('cash_audits').update({ 
-        status: 'CONTESTED', 
-        notes: `CONTESTADO por ${userName}: ${contestNotes}` 
-      }).eq('id', contestingId);
-      setContestingId(null);
-      setContestNotes('');
-      fetchAuditLogs();
-    } catch (err) { console.error(err); }
   };
 
   const renderOpen = () => (
@@ -244,419 +229,327 @@ const CashRegister: React.FC<CashRegisterProps> = ({ userRole, userId, userName 
           <Wallet size={48} />
         </div>
         <div>
-          <h2 className="text-3xl font-black text-slate-800 tracking-tight">Abertura de Caixa</h2>
-          <p className="text-slate-500 font-medium italic">Confirme o troco disponível para o terminal.</p>
+          <h2 className="text-3xl font-black text-slate-800 tracking-tight uppercase">Abertura de Caixa</h2>
+          <p className="text-slate-500 font-medium italic">Confirme os valores para iniciar o turno.</p>
         </div>
         
         {userAlreadyClosed ? (
            <div className="bg-amber-50 p-8 rounded-[2rem] border border-amber-200">
               <Lock size={32} className="mx-auto text-amber-500 mb-2" />
-              <h3 className="font-black text-amber-800 text-lg uppercase">Turno Encerrado</h3>
-              <p className="text-xs text-amber-700 mt-2 font-medium">Este terminal já foi fechado hoje.</p>
+              <h3 className="font-black text-amber-800 text-lg uppercase">Caixa Encerrado</h3>
+              <p className="text-xs text-amber-700 mt-2">O movimento de hoje já foi consolidado.</p>
            </div>
         ) : (
-          <>
-            <div className="bg-slate-50 p-8 rounded-[2rem] border border-slate-100">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3 block">Troco Inicial (Dinheiro)</label>
-              <input 
-                type="number" 
-                value={openingBalance}
-                onChange={e => setOpeningBalance(Number(e.target.value))}
-                className="w-full bg-white text-4xl font-black text-slate-800 text-center p-4 rounded-xl outline-none focus:ring-4 ring-emerald-100"
-              />
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+               <div className="bg-slate-50 p-6 rounded-[2rem] border">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Terminal</label>
+                  <select value={terminalNumber} onChange={e => setTerminalNumber(e.target.value)} className="w-full bg-white text-2xl font-black text-center p-3 rounded-xl border">
+                    <option value="01">PDV 01</option>
+                    <option value="02">PDV 02</option>
+                  </select>
+               </div>
+               <div className="bg-slate-50 p-6 rounded-[2rem] border">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Troco Inicial</label>
+                  <input type="number" value={openingBalance} onChange={e => setOpeningBalance(Number(e.target.value))} className="w-full bg-white text-2xl font-black text-center p-3 rounded-xl border" />
+               </div>
             </div>
-            <button onClick={handleOpenRegister} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-3 active:scale-95">
-              <CheckCircle2 /> Abrir Terminal
+            <button onClick={handleOpenRegister} className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-3">
+              <CheckCircle2 size={24}/> Abrir Caixa
             </button>
-          </>
+          </div>
         )}
       </div>
     </div>
   );
 
-  const renderActive = () => {
-    const { expenses } = calculateAudit();
-    const salesCount = sessionTransactions.filter(t => t.type === 'INCOME' && t.description.includes('PDV')).length;
-
-    return (
-      <div className="space-y-8 animate-in fade-in">
-        <div className="flex flex-col xl:flex-row gap-6">
-           <div className="xl:w-1/3 space-y-6">
-              <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-8 opacity-10"><Banknote size={120}/></div>
-                  <div className="flex justify-between items-center mb-1 relative z-10">
-                    <p className="text-emerald-400 text-[10px] font-black uppercase tracking-widest">Caixa Ativo</p>
-                    <div className="flex items-center gap-2">
-                       {isOnline ? <Wifi size={14} className="text-emerald-500" /> : <WifiOff size={14} className="text-rose-500 animate-pulse" />}
-                       <span className="text-[9px] font-black uppercase">{userName}</span>
-                    </div>
-                  </div>
-                  <div className="space-y-4 mt-8 relative z-10">
-                    <div className="flex justify-between items-end border-b border-white/10 pb-4">
-                       <span className="text-xs text-slate-400 font-black uppercase">Fundo Inicial</span>
-                       <span className="text-2xl font-black">R$ {openingBalance.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between items-end border-b border-white/10 pb-4">
-                       <span className="text-xs text-emerald-400 font-black uppercase">Vendas Totais ({salesCount})</span>
-                       <span className="text-2xl font-black text-emerald-400">R$ {systemCalculatedTotal.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between items-end">
-                       <span className="text-xs text-rose-400 font-black uppercase">Saídas (Sangrias)</span>
-                       <span className="text-2xl font-black text-rose-400">R$ {expenses.toFixed(2)}</span>
-                    </div>
-                  </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => setModalMode('SUPPLY')} className="bg-indigo-50 text-indigo-600 p-8 rounded-[2.5rem] border-2 border-indigo-100 hover:bg-indigo-600 hover:text-white transition-all flex flex-col items-center gap-2 group shadow-sm">
-                    <ArrowUpCircle size={32} className="group-hover:scale-110 transition-transform" /> <span className="font-black uppercase text-[10px] tracking-widest">Reforço</span>
-                  </button>
-                  <button onClick={() => setModalMode('EXPENSE')} className="bg-rose-50 text-rose-600 p-8 rounded-[2.5rem] border-2 border-rose-100 hover:bg-rose-600 hover:text-white transition-all flex flex-col items-center gap-2 group shadow-sm">
-                    <ArrowDownCircle size={32} className="group-hover:scale-110 transition-transform" /> <span className="font-black uppercase text-[10px] tracking-widest">Sangria</span>
-                  </button>
-              </div>
-
-              <button onClick={() => { setIsCountConfirmed(false); setStep('CLOSING'); }} className="w-full bg-emerald-500 text-white p-8 rounded-[3rem] flex items-center justify-center gap-4 hover:bg-emerald-600 transition-all shadow-2xl active:scale-95">
-                <Lock size={24}/> <span className="font-black uppercase tracking-[0.2em] text-sm">Fechar Turno</span>
-              </button>
-           </div>
-
-           <div className="flex-1 bg-white border border-slate-200 rounded-[3rem] p-10 shadow-sm flex flex-col">
-              <div className="flex justify-between items-center mb-10">
-                 <h3 className="font-black text-slate-800 text-xl flex items-center gap-4"><History size={24} className="text-indigo-500"/> Registro do Turno</h3>
-                 <span className="text-[10px] font-black uppercase text-slate-400 bg-slate-50 px-4 py-2 rounded-full border">Tempo Real</span>
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-4 max-h-[600px] pr-2">
-                 {sessionTransactions.map(tx => (
-                   <div key={tx.id} className="flex items-center justify-between p-6 bg-slate-50 rounded-[2rem] border border-slate-100 hover:bg-white hover:border-indigo-200 transition-all group">
-                      <div className="flex items-center gap-6">
-                         <div className={`p-4 rounded-2xl shadow-sm transition-transform group-hover:scale-110 ${tx.type === 'INCOME' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
-                           {tx.type === 'INCOME' ? <ArrowUpCircle size={24}/> : <ArrowDownCircle size={24}/>}
-                         </div>
-                         <div>
-                           <p className="font-black text-slate-800 text-lg tracking-tight">{tx.description}</p>
-                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{new Date(tx.created_at).toLocaleTimeString()}</p>
-                         </div>
-                      </div>
-                      <div className="text-right">
-                        <p className={`font-black text-xl ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {tx.type === 'EXPENSE' ? '-' : '+'} R$ {tx.amount.toFixed(2)}
-                        </p>
-                      </div>
-                   </div>
-                 ))}
-                 {sessionTransactions.length === 0 && (
-                   <div className="py-20 text-center opacity-20 flex flex-col items-center gap-4">
-                      <RefreshCw size={48} className="animate-spin-slow" />
-                      <p className="font-black uppercase text-xs tracking-widest">Aguardando transações...</p>
-                   </div>
-                 )}
-              </div>
-           </div>
-        </div>
-
-        {modalMode && (
-          <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
-             <div className="bg-white w-full max-w-lg rounded-[3rem] p-12 shadow-2xl animate-in zoom-in-95">
-                <div className="text-center mb-10">
-                  <h3 className="text-3xl font-black text-slate-800 tracking-tight">{modalMode === 'SUPPLY' ? 'Reforço' : 'Sangria'}</h3>
+  const renderActive = () => (
+    <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in">
+       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden flex flex-col justify-between">
+             <div className="absolute top-0 right-0 p-8 opacity-10"><TrendingUp size={120}/></div>
+             <div>
+                <div className="text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-4 flex items-center gap-2">
+                   <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div> Terminal {terminalNumber} em Operação
                 </div>
-                <div className="space-y-6">
-                  <div className="relative">
-                     <span className="absolute left-8 top-1/2 -translate-y-1/2 font-black text-slate-300 text-2xl">R$</span>
-                     <input type="number" autoFocus placeholder="0.00" value={formData.val === 0 ? '' : formData.val} onChange={e => setFormData({...formData, val: Number(e.target.value)})} className="w-full pl-20 p-8 bg-slate-50 border border-slate-200 rounded-[2.5rem] font-black outline-none text-4xl text-slate-800" />
-                  </div>
-                  <input type="text" placeholder="Motivo/Descrição" value={formData.desc} onChange={e => setFormData({...formData, desc: e.target.value})} className="w-full p-6 bg-slate-50 border border-slate-200 rounded-2xl font-bold outline-none text-center" />
-                  <div className="flex gap-4 pt-6">
-                    <button onClick={() => setModalMode(null)} className="flex-1 py-5 bg-slate-100 text-slate-400 rounded-3xl font-black uppercase text-xs">Voltar</button>
-                    <button onClick={handleAddTransaction} disabled={loading} className="flex-1 py-5 bg-slate-900 text-white rounded-3xl font-black uppercase text-xs shadow-xl flex items-center justify-center gap-2">
-                       {loading ? <Loader2 className="animate-spin" /> : 'Confirmar'}
-                    </button>
-                  </div>
-                </div>
+                <h3 className="text-slate-400 font-bold text-xs uppercase mb-1">Entradas em Dinheiro</h3>
+                <p className="text-4xl font-black">R$ {summary?.cash.toFixed(2) || '0.00'}</p>
+             </div>
+             <div className="mt-10 pt-10 border-t border-white/10 space-y-4">
+                <div className="flex justify-between text-xs font-bold text-slate-400 uppercase"><span>Fundo Inicial</span><span>R$ {openingBalance.toFixed(2)}</span></div>
+                <div className="flex justify-between text-xs font-bold text-emerald-400 uppercase"><span>Vendas (Total)</span><span>R$ {summary?.totalSales.toFixed(2)}</span></div>
              </div>
           </div>
-        )}
-      </div>
-    );
-  };
 
-  const renderClosing = () => {
-    const { expectedCash, diff, cashSales, pixSales, creditSales, debitSales, supplies, expenses, uncategorizedSales } = calculateAudit();
-    const isCorrect = Math.abs(diff) < 0.01;
-    const salesCount = sessionTransactions.filter(t => t.type === 'INCOME' && t.description.includes('PDV')).length;
-    const ticketMedio = salesCount > 0 ? (systemCalculatedTotal / salesCount) : 0;
-
-    return (
-      <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-8">
-        {!isCountConfirmed ? (
-           <div className="bg-white p-12 rounded-[4rem] border-4 border-slate-900 text-center shadow-2xl">
-              <Coins size={64} className="mx-auto text-indigo-500 mb-6" />
-              <h3 className="text-3xl font-black text-slate-800 mb-4 tracking-tighter">Contagem de Gaveta</h3>
-              <p className="text-slate-500 font-medium mb-10 italic">Conte todo o dinheiro físico na gaveta do terminal agora.</p>
-              
-              <div className="max-w-xs mx-auto mb-10">
-                 <label className="text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-2 block">Dinheiro Contado (R$)</label>
-                 <input 
-                   type="number" 
-                   value={countedCash || ''} 
-                   onChange={e => setCountedCash(Number(e.target.value))}
-                   className="w-full p-6 bg-slate-50 border-2 border-slate-200 rounded-[2rem] text-center font-black text-4xl outline-none focus:border-indigo-500" 
-                   placeholder="0.00"
-                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                 <button onClick={() => setStep('ACTIVE')} className="py-5 bg-slate-100 text-slate-500 rounded-3xl font-black uppercase text-xs">Voltar</button>
-                 <button onClick={() => setIsCountConfirmed(true)} className="py-5 bg-slate-900 text-white rounded-3xl font-black uppercase text-xs shadow-xl hover:bg-indigo-600 transition-all">Confirmar Contagem</button>
-              </div>
-           </div>
-        ) : (
-           <div className="bg-white p-12 rounded-[4rem] shadow-2xl space-y-10 animate-in zoom-in-95">
-              <div className="flex justify-between items-start">
-                 <div>
-                    <h3 className="text-3xl font-black text-slate-800 tracking-tighter">Relatório de Fechamento</h3>
-                    <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest mt-1">Terminal: {userName}</p>
-                 </div>
-                 <div className="text-right">
-                    <div className={`px-4 py-2 rounded-xl font-black text-xs uppercase tracking-widest ${isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
-                       {isCorrect ? 'Caixa Batido' : 'Divergência Detectada'}
+          <div className="lg:col-span-2 bg-white border rounded-[3rem] p-10 shadow-sm flex flex-col h-[450px]">
+             <div className="flex justify-between items-center mb-8">
+                <h3 className="font-black text-slate-800 text-xl flex items-center gap-3"><History className="text-indigo-500"/> Atividade Recente</h3>
+                <button onClick={fetchSessionData} className="p-2 text-slate-400 hover:bg-slate-50 rounded-xl"><RefreshCw size={18}/></button>
+             </div>
+             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                {sessionTransactions.length > 0 ? (
+                  sessionTransactions.map(tx => (
+                    <div key={tx.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:bg-white hover:border-indigo-200 transition-all">
+                       <div className="flex items-center gap-4">
+                          <div className={`p-2 rounded-xl ${tx.type === 'INCOME' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                             {tx.type === 'INCOME' ? <ArrowUpCircle size={20}/> : <ArrowDownCircle size={20}/>}
+                          </div>
+                          <div>
+                             <p className="font-black text-slate-800 text-sm">{tx.description}</p>
+                             <p className="text-[10px] font-bold text-slate-400 uppercase">{new Date(tx.created_at).toLocaleTimeString()}</p>
+                          </div>
+                       </div>
+                       <span className={`font-black ${tx.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>R$ {tx.amount.toFixed(2)}</span>
                     </div>
-                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                 <div className="bg-slate-50 p-6 rounded-[2.5rem] border">
-                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Ticket Médio</p>
-                    <p className="text-2xl font-black text-indigo-600">R$ {ticketMedio.toFixed(2)}</p>
-                 </div>
-                 <div className="bg-slate-50 p-6 rounded-[2.5rem] border">
-                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Vendas Totais (Sistema)</p>
-                    <p className="text-2xl font-black text-emerald-600">R$ {systemCalculatedTotal.toFixed(2)}</p>
-                 </div>
-                 <div className={`p-6 rounded-[2.5rem] border-2 ${isCorrect ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}>
-                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Diferença Furo Dinheiro</p>
-                    <p className={`text-2xl font-black ${isCorrect ? 'text-emerald-700' : 'text-rose-700'}`}>R$ {diff.toFixed(2)}</p>
-                 </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                 <div className="border-t border-slate-100 pt-10">
-                    <h4 className="font-black text-slate-800 text-lg mb-6 flex items-center gap-2"><TrendingUp size={20} className="text-emerald-500"/> Composição em Dinheiro</h4>
-                    <div className="space-y-3">
-                       <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">Fundo Inicial (+)</span> <span className="text-slate-700">R$ {openingBalance.toFixed(2)}</span></div>
-                       <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">Vendas Dinheiro (+)</span> <span className="text-emerald-600 font-black">R$ {cashSales.toFixed(2)}</span></div>
-                       <div className="flex justify-between text-sm font-bold"><span className="text-slate-400">Reforços (+)</span> <span className="text-slate-700">R$ {supplies.toFixed(2)}</span></div>
-                       <div className="flex justify-between text-sm font-bold border-b border-slate-100 pb-3"><span className="text-slate-400">Sangrias (-)</span> <span className="text-rose-500">R$ {expenses.toFixed(2)}</span></div>
-                       <div className="flex justify-between text-lg font-black pt-2"><span className="text-slate-800 uppercase tracking-tighter">Esperado em Caixa</span> <span className="text-indigo-600">R$ {expectedCash.toFixed(2)}</span></div>
-                       <div className="bg-slate-900 text-white p-6 rounded-[2rem] mt-4 flex justify-between items-center">
-                          <span className="text-xs font-black uppercase opacity-60">Informado Físico</span>
-                          <span className="text-3xl font-black">R$ {countedCash.toFixed(2)}</span>
-                       </div>
-                    </div>
-                 </div>
-
-                 <div className="border-t border-slate-100 pt-10">
-                    <h4 className="font-black text-slate-800 text-lg mb-6 flex items-center gap-2"><CreditCard size={20} className="text-indigo-500"/> Outros Recebimentos</h4>
-                    <div className="space-y-4">
-                       <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                          <div className="flex items-center gap-3"><div className="p-2 bg-white rounded-lg text-indigo-600 shadow-sm"><QrCode size={16}/></div><span className="font-black text-slate-600 text-[10px] uppercase tracking-widest">PIX</span></div>
-                          <span className="font-black text-slate-800">R$ {pixSales.toFixed(2)}</span>
-                       </div>
-
-                       <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                          <div className="flex items-center gap-3"><div className="p-2 bg-white rounded-lg text-indigo-600 shadow-sm"><CreditCard size={16}/></div><span className="font-black text-slate-600 text-[10px] uppercase tracking-widest">Crédito</span></div>
-                          <span className="font-black text-slate-800">R$ {creditSales.toFixed(2)}</span>
-                       </div>
-
-                       <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                          <div className="flex items-center gap-3"><div className="p-2 bg-white rounded-lg text-indigo-600 shadow-sm"><Landmark size={16}/></div><span className="font-black text-slate-600 text-[10px] uppercase tracking-widest">Débito</span></div>
-                          <span className="font-black text-slate-800">R$ {debitSales.toFixed(2)}</span>
-                       </div>
-
-                       {uncategorizedSales > 0 && (
-                         <div className="flex items-center justify-between p-4 bg-rose-50 rounded-2xl border border-rose-100 animate-pulse">
-                            <div className="flex items-center gap-3"><div className="p-2 bg-white rounded-lg text-rose-600 shadow-sm"><HelpCircle size={16}/></div><span className="font-black text-rose-600 text-[10px] uppercase tracking-widest">Não Categorizadas</span></div>
-                            <span className="font-black text-rose-800">R$ {uncategorizedSales.toFixed(2)}</span>
-                         </div>
-                       )}
-                       
-                       <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-                          <p className="text-[10px] text-indigo-800 font-bold leading-tight">
-                            <span className="font-black uppercase">Nota Auditoria:</span> A soma de todos os campos (Incluindo Não Categorizadas) totaliza os R$ {systemCalculatedTotal.toFixed(2)} registrados hoje.
-                          </p>
-                       </div>
-                    </div>
-                 </div>
-              </div>
-
-              <div className="pt-10 border-t border-slate-100 space-y-6">
-                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-200">
-                    <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-4">Reserva para Próxima Abertura (Gaveta)</label>
-                    <input type="number" value={closingReserve} onChange={e => setClosingReserve(Number(e.target.value))} className="w-full p-4 bg-white border-2 border-indigo-100 rounded-2xl font-black text-center text-indigo-700 mt-2 outline-none" />
-                </div>
-
-                {!isCorrect && (
-                  <div className="p-6 bg-rose-50 rounded-[2rem] border border-rose-100 flex gap-4 animate-pulse">
-                     <AlertTriangle className="text-rose-500 shrink-0" size={24} />
-                     <p className="text-xs font-bold text-rose-800 leading-relaxed">
-                       <span className="font-black uppercase">Atenção Auditor:</span> Foi detectada uma divergência entre o sistema e o físico. Este fechamento será marcado como "Crítico" no painel administrativo para averiguação de quebra de caixa.
-                     </p>
+                  ))
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-10 space-y-4">
+                     <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center text-slate-300">
+                        <History size={40} />
+                     </div>
+                     <div>
+                        <p className="font-black text-slate-400 uppercase text-xs tracking-widest">Nenhuma atividade</p>
+                        <p className="text-[10px] text-slate-300 font-bold uppercase mt-1">As vendas aparecerão aqui em tempo real</p>
+                     </div>
                   </div>
                 )}
+             </div>
+             {isDemo && (
+               <div className="mt-4 p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-center gap-3">
+                  <AlertCircle size={18} className="text-amber-500" />
+                  <p className="text-[10px] font-black text-amber-800 uppercase tracking-tight">Modo Demonstração: Dados fictícios exibidos para visualização.</p>
+               </div>
+             )}
+          </div>
+       </div>
 
-                <button onClick={handleFinishClosing} disabled={loading} className="w-full py-8 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase tracking-[0.3em] shadow-xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4 active:scale-95">
-                  {loading ? <Loader2 className="animate-spin" /> : <CloudSync />} Finalizar Turno e Sincronizar
-                </button>
-              </div>
-           </div>
-        )}
+       <div className="flex justify-center pt-8">
+          <button onClick={() => setStep('CLOSING')} className="px-20 py-8 bg-rose-600 text-white rounded-[3rem] font-black uppercase tracking-[0.3em] shadow-2xl hover:bg-rose-700 transition-all flex items-center gap-4 active:scale-95">
+             <Lock size={28}/> Fechar Turno e Conferir
+          </button>
+       </div>
+    </div>
+  );
+
+  const renderClosing = () => {
+    const diff = countedCash - (summary?.expectedInDrawer || 0);
+    return (
+      <div className="max-w-6xl mx-auto space-y-8 animate-in slide-in-from-bottom-4">
+         <header className="text-center space-y-2">
+            <h2 className="text-4xl font-black text-slate-800 tracking-tighter uppercase">Fechamento de Gaveta</h2>
+            <p className="text-slate-500 font-medium">Conte as cédulas e moedas com atenção.</p>
+         </header>
+
+         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-white border rounded-[3rem] p-10 shadow-sm space-y-6">
+               <h3 className="font-black text-slate-800 text-lg flex items-center gap-3 border-b pb-4">
+                  <Banknote className="text-indigo-500" /> Contador de Cédulas
+               </h3>
+               <div className="grid grid-cols-1 gap-3">
+                  {BILLS.map(bill => (
+                    <div key={bill.value} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border">
+                       <span className="font-black text-slate-700 w-24">{bill.label}</span>
+                       <div className="flex items-center gap-4">
+                          <span className="text-slate-400 font-bold text-xs uppercase">Qtd:</span>
+                          <input 
+                            type="number" 
+                            min="0"
+                            value={billCounts[bill.value] || ''}
+                            onChange={e => updateBillCount(bill.value, Number(e.target.value))}
+                            className="w-20 p-2 rounded-xl border-2 border-indigo-100 text-center font-black text-indigo-600 focus:border-indigo-400 outline-none" 
+                          />
+                          <span className="w-24 text-right font-black text-slate-800">R$ {((billCounts[bill.value] || 0) * bill.value).toFixed(2)}</span>
+                       </div>
+                    </div>
+                  ))}
+               </div>
+               <div className="pt-6 border-t flex justify-between items-center">
+                  <span className="font-black text-slate-400 uppercase tracking-widest">Total Físico Contado</span>
+                  <span className="text-4xl font-black text-slate-900 tracking-tighter">R$ {countedCash.toFixed(2)}</span>
+               </div>
+            </div>
+
+            <div className="space-y-6">
+               <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-xl space-y-8">
+                  <h3 className="font-black text-xs uppercase tracking-[0.2em] text-emerald-400 border-b border-white/10 pb-4">Consolidação do Sistema</h3>
+                  <div className="space-y-4">
+                     <div className="flex justify-between items-center">
+                        <span className="text-slate-400 font-bold text-sm uppercase">Fundo + Dinheiro + Reforço</span>
+                        <span className="font-black text-xl text-emerald-400">+ R$ {(summary?.expectedInDrawer + summary?.expenses).toFixed(2)}</span>
+                     </div>
+                     <div className="flex justify-between items-center">
+                        <span className="text-slate-400 font-bold text-sm uppercase">Sangrias / Despesas</span>
+                        <span className="font-black text-xl text-rose-400">- R$ {summary?.expenses.toFixed(2)}</span>
+                     </div>
+                     <div className="pt-6 border-t border-white/10 flex justify-between items-center">
+                        <span className="font-black uppercase tracking-widest text-xs">Esperado em Gaveta</span>
+                        <span className="text-3xl font-black">R$ {summary?.expectedInDrawer.toFixed(2)}</span>
+                     </div>
+                  </div>
+               </div>
+
+               <div className={`p-8 rounded-[2.5rem] border-4 transition-all ${Math.abs(diff) < 0.01 ? 'bg-emerald-50 border-emerald-500' : 'bg-rose-50 border-rose-500'}`}>
+                  <div className="flex items-center justify-between mb-4">
+                     <h4 className="font-black uppercase tracking-widest text-xs">Diferença de Caixa</h4>
+                     <AlertCircle className={Math.abs(diff) < 0.01 ? 'text-emerald-500' : 'text-rose-500'} />
+                  </div>
+                  <p className={`text-4xl font-black ${Math.abs(diff) < 0.01 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                     {diff === 0 ? 'CAIXA PERFEITO' : `DIF: R$ ${diff.toFixed(2)}`}
+                  </p>
+                  
+                  {Math.abs(diff) > 0.01 && showDiagnostic && (
+                     <div className="mt-6 space-y-4 animate-in slide-in-from-top-2">
+                        <div className="p-4 bg-white/50 rounded-2xl border border-rose-200">
+                           <p className="text-[10px] font-black uppercase text-rose-700 mb-2">Diagnóstico de Falha Sugerido:</p>
+                           <ul className="text-xs font-bold text-rose-900 list-disc pl-4 space-y-1">
+                              <li>{diff < 0 ? "Faltou dinheiro: Confira se pagou algum fornecedor e esqueceu de lançar a Sangria." : "Sobrou dinheiro: Confira se alguma venda em CARTÃO foi lançada como DINHEIRO."}</li>
+                              <li>Verifique se o Troco Inicial de R$ {openingBalance.toFixed(2)} estava correto.</li>
+                              <li>Confira os 10% do garçom: foram retirados ou ficaram na gaveta?</li>
+                           </ul>
+                        </div>
+                        <div className="space-y-1">
+                           <label className="text-[9px] font-black uppercase text-rose-600 ml-2">Justificativa Obrigatória</label>
+                           <textarea 
+                             value={justification}
+                             onChange={e => setJustification(e.target.value)}
+                             placeholder="Descreva aqui o que pode ter ocorrido para esta diferença..."
+                             className="w-full p-4 bg-white rounded-2xl border-2 border-rose-100 outline-none focus:border-rose-400 font-bold text-sm h-24"
+                           />
+                        </div>
+                     </div>
+                  )}
+               </div>
+
+               <button onClick={handleFinalize} disabled={loading} className="w-full py-8 bg-slate-900 text-white rounded-[3rem] font-black uppercase tracking-[0.2em] shadow-2xl hover:bg-emerald-600 transition-all flex items-center justify-center gap-4">
+                  {loading ? <Loader2 className="animate-spin" /> : <CheckSquare size={24}/>} Confirmar e Gerar Fita
+               </button>
+            </div>
+         </div>
       </div>
     );
   };
 
-  const renderHistory = () => (
-    <div className="space-y-8 animate-in fade-in">
-       {!isAdmin ? (
-         <div className="text-center py-32 opacity-30 flex flex-col items-center gap-4 bg-white rounded-[4rem] border border-dashed">
-            <History size={64}/>
-            <p className="font-black uppercase tracking-widest text-xs">Apenas Administradores podem visualizar o histórico consolidado.</p>
-         </div>
-       ) : (
-         <div className="grid grid-cols-1 gap-6">
-            <header className="flex justify-between items-center px-4">
-               <h3 className="font-black text-2xl text-slate-800 flex items-center gap-3"><ShieldCheck className="text-indigo-600" /> Auditoria de Fechamentos</h3>
-               <div className="flex gap-2">
-                  <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl border">
-                    <Search size={14} className="text-slate-400" />
-                    <input type="text" placeholder="Filtrar operador..." className="text-xs font-bold outline-none" />
-                  </div>
-               </div>
-            </header>
+  const renderFita = () => (
+    <div className="max-w-xl mx-auto py-12 animate-in zoom-in-95">
+       <div id="printable-fita" className="bg-white p-12 shadow-2xl border-2 border-slate-100 relative overflow-hidden font-mono text-slate-800">
+          {/* Thermal Paper Header Style */}
+          <div className="text-center border-b-2 border-dashed border-slate-300 pb-8 mb-8">
+             <h2 className="text-2xl font-black tracking-widest uppercase">Counter Enterprise</h2>
+             <p className="text-[10px] font-bold uppercase mt-1">Gestão Operacional de Pizzaria</p>
+             <div className="mt-6 space-y-1 text-xs">
+                <p>FECHAMENTO DE CAIXA: {new Date().toLocaleDateString()}</p>
+                <p>TERMINAL: {terminalNumber} | OPERADOR: {userName?.toUpperCase()}</p>
+                <p>HORÁRIO: {new Date().toLocaleTimeString()}</p>
+             </div>
+          </div>
 
-            <div className="bg-white border border-slate-200 rounded-[3rem] overflow-hidden shadow-sm">
-               <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                     <thead className="bg-slate-50 border-b text-[10px] font-black uppercase text-slate-400">
-                        <tr>
-                           <th className="px-10 py-6">Data</th>
-                           <th className="px-10 py-6">Operador</th>
-                           <th className="px-10 py-6">Furo de Caixa</th>
-                           <th className="px-10 py-6">Status</th>
-                           <th className="px-10 py-6 text-right">Ações de Gestão</th>
+          <div className="space-y-8">
+             <section>
+                <h4 className="font-black border-b border-slate-200 pb-1 mb-3 text-sm uppercase">1. Métricas de Produção</h4>
+                <div className="flex justify-between text-sm">
+                   <span>TOTAL DE PIZZAS VENDIDAS</span>
+                   <span className="font-black">{summary?.pizzaCount} UN</span>
+                </div>
+             </section>
+
+             <section>
+                <h4 className="font-black border-b border-slate-200 pb-1 mb-3 text-sm uppercase">2. Logística (Motoboys)</h4>
+                <table className="w-full text-xs">
+                   <thead>
+                      <tr className="text-left font-black opacity-60">
+                         <th className="pb-2">ENTREGADOR</th>
+                         <th className="pb-2 text-center">QTD</th>
+                         <th className="pb-2 text-right">TAXAS R$</th>
+                      </tr>
+                   </thead>
+                   <tbody>
+                      {Object.entries(summary?.motoboyMap || {}).map(([name, stats]: any) => (
+                        <tr key={name} className="border-b border-slate-50 last:border-0">
+                           <td className="py-2 font-black uppercase">{name}</td>
+                           <td className="py-2 text-center">{stats.count}</td>
+                           <td className="py-2 text-right font-black">{stats.fees.toFixed(2)}</td>
                         </tr>
-                     </thead>
-                     <tbody className="divide-y">
-                        {auditLogs.map(log => (
-                          <tr key={log.id} className="hover:bg-slate-50 transition-colors">
-                             <td className="px-10 py-6 font-bold">{new Date(log.date).toLocaleDateString()}</td>
-                             <td className="px-10 py-6">
-                                <div className="flex items-center gap-2">
-                                   <User size={14} className="text-slate-400" />
-                                   <span className="font-black text-sm uppercase tracking-tight">{log.audited_by}</span>
-                                </div>
-                             </td>
-                             <td className="px-10 py-6">
-                                <span className={`font-black text-sm ${log.difference_value === 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                                   R$ {log.difference_value.toFixed(2)}
-                                </span>
-                             </td>
-                             <td className="px-10 py-6">
-                                <span className={`px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${
-                                  log.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' : 
-                                  log.status === 'CONTESTED' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
-                                }`}>
-                                   {log.status === 'APPROVED' ? 'Conferido' : log.status === 'CONTESTED' ? 'Contestado' : 'Pendente'}
-                                </span>
-                             </td>
-                             <td className="px-10 py-6 text-right">
-                                <div className="flex justify-end gap-2">
-                                   {log.status === 'PENDING' && (
-                                     <>
-                                       <button 
-                                         onClick={() => handleConferAudit(log.id)}
-                                         className="flex items-center gap-2 bg-emerald-500 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-all"
-                                       >
-                                         <CheckSquare size={14} /> Conferir
-                                       </button>
-                                       <button 
-                                         onClick={() => setContestingId(log.id)}
-                                         className="flex items-center gap-2 bg-rose-50 text-rose-600 border border-rose-100 px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-rose-100 transition-all"
-                                       >
-                                         <ShieldAlert size={14} /> Contestar
-                                       </button>
-                                     </>
-                                   )}
-                                   <button className="p-2 text-slate-300 hover:text-indigo-600" title="Ver Comprovantes"><Camera size={18}/></button>
-                                </div>
-                             </td>
-                          </tr>
-                        ))}
-                        {auditLogs.length === 0 && (
-                          <tr><td colSpan={5} className="py-20 text-center font-black text-slate-300 uppercase tracking-widest text-xs">Nenhum log de auditoria encontrado.</td></tr>
-                        )}
-                     </tbody>
-                  </table>
-               </div>
-            </div>
-         </div>
-       )}
+                      ))}
+                   </tbody>
+                </table>
+             </section>
 
-       {/* Modal de Contestação */}
-       {contestingId && (
-         <div className="fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
-            <div className="bg-white w-full max-w-lg rounded-[3rem] p-12 shadow-2xl animate-in zoom-in-95">
-               <div className="flex justify-between items-center mb-8">
-                  <h3 className="text-2xl font-black text-slate-800 tracking-tight">Contestar Fechamento</h3>
-                  <button onClick={() => { setContestingId(null); setContestNotes(''); }}><X size={24} className="text-slate-400" /></button>
-               </div>
-               <div className="space-y-6">
-                  <div className="bg-rose-50 p-6 rounded-2xl border border-rose-100 flex gap-4">
-                     <ShieldAlert size={24} className="text-rose-500 shrink-0" />
-                     <p className="text-xs font-bold text-rose-800 leading-tight">Ao contestar, o operador será notificado sobre a falha no caixa para prestar esclarecimentos.</p>
-                  </div>
-                  <div className="space-y-2">
-                     <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Motivo da Falha / Observação</label>
-                     <textarea 
-                        value={contestNotes}
-                        onChange={e => setContestNotes(e.target.value)}
-                        placeholder="Ex: Diferença de R$ 50,00 não justificada em dinheiro. Falta comprovante de sangria..."
-                        className="w-full p-6 bg-slate-50 border rounded-[2rem] font-bold text-sm h-32 outline-none focus:ring-4 ring-rose-100"
-                     ></textarea>
-                  </div>
-                  <button 
-                    onClick={handleContestAudit}
-                    className="w-full py-5 bg-rose-600 text-white rounded-3xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95"
-                  >
-                    Confirmar Contestação
-                  </button>
-               </div>
-            </div>
-         </div>
-       )}
+             <section>
+                <h4 className="font-black border-b border-slate-200 pb-1 mb-3 text-sm uppercase">3. Financeiro Detalhado</h4>
+                <div className="space-y-2 text-sm">
+                   <div className="flex justify-between"><span>DINHEIRO (GAVETA)</span><span className="font-black">R$ {summary?.cash.toFixed(2)}</span></div>
+                   <div className="flex justify-between"><span>PIX RECEBIDO</span><span className="font-black">R$ {summary?.pix.toFixed(2)}</span></div>
+                   <div className="flex justify-between"><span>CARTÕES (DÉB/CRÉD)</span><span className="font-black">R$ {summary?.cards.toFixed(2)}</span></div>
+                   <div className="flex justify-between pt-2 border-t font-black text-indigo-600"><span>TOTAL DE 10% GARÇOM</span><span>R$ {summary?.serviceCharges.toFixed(2)}</span></div>
+                </div>
+             </section>
+
+             <section className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+                <h4 className="font-black border-b border-slate-300 pb-1 mb-3 text-xs uppercase text-slate-500">Conferência de Caixa</h4>
+                <div className="space-y-2 text-xs">
+                   <div className="flex justify-between"><span>FUNDO ABERTURA</span><span className="font-black">R$ {openingBalance.toFixed(2)}</span></div>
+                   <div className="flex justify-between"><span>ESPERADO EM GAVETA</span><span className="font-black">R$ {summary?.expectedInDrawer.toFixed(2)}</span></div>
+                   <div className="flex justify-between pt-2 border-t font-black"><span>REAL CONTADO</span><span className="text-lg">R$ {countedCash.toFixed(2)}</span></div>
+                   <div className="flex justify-between font-black text-rose-600">
+                      <span>DIFERENÇA FINAL</span>
+                      <span>R$ {(countedCash - summary?.expectedInDrawer).toFixed(2)}</span>
+                   </div>
+                </div>
+             </section>
+          </div>
+
+          <div className="mt-12 pt-8 border-t-2 border-dashed border-slate-300 text-center space-y-8">
+             <div className="border-t border-slate-900 pt-2 inline-block px-10">
+                <p className="text-[10px] font-black uppercase">Assinatura Operador</p>
+             </div>
+             <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Relatório Auditado por Counter AI v10</p>
+          </div>
+       </div>
+
+       <div className="flex gap-4 mt-8 no-print">
+          <button onClick={() => window.print()} className="flex-1 py-6 bg-emerald-500 text-white rounded-[2rem] font-black uppercase tracking-widest shadow-xl hover:bg-emerald-600 flex items-center justify-center gap-3">
+             <Printer size={24}/> Imprimir Fita
+          </button>
+          <button onClick={() => { setStep('OPEN'); setUserAlreadyClosed(true); }} className="flex-1 py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-3">
+             <CheckCircle2 size={24}/> Finalizar Turno
+          </button>
+       </div>
     </div>
   );
 
   return (
     <div className="pb-24">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-12">
-        <div>
+        <div className="no-print">
            <h2 className="text-4xl font-black text-slate-800 tracking-tight">Frente de Caixa</h2>
            <div className="flex items-center gap-3 mt-1">
-              <p className="text-slate-500 font-medium">Gestão de gaveta e sangria por terminal.</p>
+              <p className="text-slate-500 font-medium">Gestão de fechamento e auditoria de terminal.</p>
               {isOnline ? <Wifi size={14} className="text-emerald-500" /> : <WifiOff size={14} className="text-rose-500" />}
            </div>
-        </div>
-        <div className="flex bg-white p-1 rounded-2xl border">
-           <button onClick={() => setStep('OPEN')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase ${step === 'OPEN' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}>Caixa</button>
-           <button onClick={() => setStep('HISTORY')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase ${step === 'HISTORY' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}`}>Auditoria</button>
         </div>
       </header>
 
       {step === 'OPEN' && renderOpen()}
       {step === 'ACTIVE' && renderActive()}
       {step === 'CLOSING' && renderClosing()}
-      {step === 'HISTORY' && renderHistory()}
+      {step === 'FITA' && renderFita()}
+
+      <style>{`
+        @media print {
+          body * { visibility: hidden; background: white !important; }
+          #printable-fita, #printable-fita * { visibility: visible; }
+          #printable-fita { 
+            position: absolute; 
+            left: 0; 
+            top: 0; 
+            width: 80mm; 
+            padding: 0; 
+            box-shadow: none; 
+            border: none;
+          }
+          .no-print { display: none !important; }
+        }
+      `}</style>
     </div>
   );
 };

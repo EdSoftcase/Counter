@@ -5,10 +5,10 @@ export enum UserRole {
   OPERATOR = 'OPERATOR'
 }
 
-export type AppModule = 'dashboard' | 'timeclock' | 'routines' | 'execution' | 'users' | 'reports' | 'audit' | 'niches' | 'proposal' | 'validation' | 'database' | 'settings' | 'inventory' | 'compliance' | 'finance' | 'cash_register' | 'pos';
+export type AppModule = 'dashboard' | 'timeclock' | 'routines' | 'execution' | 'users' | 'reports' | 'audit' | 'niches' | 'proposal' | 'validation' | 'database' | 'settings' | 'inventory' | 'compliance' | 'finance' | 'cash_register' | 'pos' | 'self_service';
 
 export type ProductCategory = 'ENTRADAS' | 'PIZZAS' | 'BEBIDAS' | 'PORCOES' | 'BORDAS' | 'VINHOS' | 'SABORES_PIZZA';
-export type OrderType = 'DINE_IN' | 'DELIVERY' | 'COUNTER';
+export type OrderType = 'DINE_IN' | 'DELIVERY' | 'COUNTER' | 'SELF_SERVICE';
 export type OrderStatus = 'AVAILABLE' | 'OCCUPIED' | 'PREPARING' | 'READY' | 'SHIPPED' | 'COMPLETED' | 'CANCELLED';
 
 export interface CompanyConfig {
@@ -57,6 +57,7 @@ export interface OrderItem {
   is_pizza?: boolean;
   sent_to_kitchen?: boolean;
   cancelled_by?: string;
+  origin?: 'SELF_SERVICE' | 'POS';
 }
 
 export interface TableSession {
@@ -75,6 +76,9 @@ export interface TableSession {
   operator_name?: string;
   delivery_fee?: number;
   use_service_charge: boolean;
+  terminal_id?: string;
+  split_count?: number;
+  paid_amount?: number;
 }
 
 export interface Unit { id: string; company_id: string; name: string; address: string; }
