@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Utensils, ShoppingCart, Trash2, CheckCircle2, ChevronRight,
   X, Loader2, Pizza, Soup, CookingPot, Coffee,
   Timer, PlusCircle, CheckSquare, DollarSign, Sparkles, User, 
   ChevronLeft, Layers, ArrowLeft, UtensilsCrossed, Bike, Monitor, History,
   UserPlus, MapPin, QrCode, CreditCard, Landmark, Check, Send, Beer, Search, MessageSquare,
-  Filter, RefreshCw, Calculator, Plus, Trash, Info, UserMinus, UserPlus2
+  Filter, RefreshCw, Calculator, Plus, Trash, Info, UserMinus, UserPlus2, ReceiptText
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { MenuProduct, ProductCategory, TableSession, OrderItem, Customer, OrderType, OrderStatus } from '../types';
@@ -338,7 +339,7 @@ const POS: React.FC<any> = ({ userName, userId }) => {
 
       // Limpar mesa ou remover delivery
       if (selectedSession.type === 'DINE_IN') {
-        setTables(prev => prev.map(t => t.id === selectedSession.id ? { ...t, items: [], status: 'AVAILABLE', opened_at: '', use_service_charge: true } : t));
+        setTables(prev => prev.map(t => t.id === selectedSession.id ? { ...t, items: [], status: 'AVAILABLE', opened_at: '', use_service_charge: true, bill_requested: false } : t));
       } else {
         setTables(prev => prev.filter(t => t.id !== selectedSession.id));
       }
@@ -448,8 +449,14 @@ const POS: React.FC<any> = ({ userName, userId }) => {
                const isOccupied = table.items.length > 0;
                const subtotal = table.items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
                const serviceCharge = table.use_service_charge ? subtotal * 0.10 : 0;
+               const billRequested = table.bill_requested;
                return (
-                 <div key={table.id} onClick={() => { setSelectedSession(table); setCart([]); setView('ORDER'); }} className={`p-10 rounded-[3rem] border-2 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all ${isOccupied ? 'bg-slate-900 border-slate-900 text-white shadow-xl scale-105' : 'bg-white border-slate-100 text-slate-400 hover:border-emerald-400'}`}>
+                 <div key={table.id} onClick={() => { setSelectedSession(table); setCart([]); setView('ORDER'); }} className={`relative p-10 rounded-[3rem] border-2 flex flex-col items-center justify-center gap-4 cursor-pointer transition-all ${isOccupied ? (billRequested ? 'bg-amber-500 border-amber-400 text-white shadow-xl scale-105 animate-pulse' : 'bg-slate-900 border-slate-900 text-white shadow-xl scale-105') : 'bg-white border-slate-100 text-slate-400 hover:border-emerald-400'}`}>
+                    {billRequested && (
+                      <div className="absolute -top-3 -right-3 bg-white text-amber-600 p-2 rounded-full shadow-lg border-2 border-amber-400 z-10">
+                        <ReceiptText size={20} />
+                      </div>
+                    )}
                     <div className={`p-4 rounded-2xl ${isOccupied ? 'bg-white/10' : 'bg-slate-50'}`}><Utensils size={32}/></div>
                     <div className="text-center">
                        <h4 className="font-black text-2xl tracking-tighter">Mesa {table.table_number}</h4>
@@ -740,21 +747,56 @@ const POS: React.FC<any> = ({ userName, userId }) => {
                  <ShoppingCart className="opacity-20" size={32}/>
               </div>
               <div className="flex-1 overflow-y-auto p-8 space-y-4 bg-slate-50/50 custom-scrollbar">
-                 {selectedSession.items.map((it, idx) => (
-                   <div key={`sent-${idx}`} className="bg-slate-100 p-6 rounded-2xl border flex flex-col gap-2 opacity-70">
-                      <div className="flex justify-between items-center"><p className="font-black text-slate-700 text-sm">{it.quantity}x {it.name}</p><span className="text-[10px] font-black text-slate-400">R$ {it.price.toFixed(2)}</span></div>
-                      {it.notes && <p className="text-[9px] font-bold text-amber-600 uppercase italic">OBS: {it.notes}</p>}
-                   </div>
-                 ))}
-                 {cart.map((it, idx) => (
-                   <div key={`new-${idx}`} className="bg-white p-6 rounded-[2.5rem] border-2 border-indigo-100 flex flex-col gap-3 shadow-sm animate-in slide-in-from-right-4">
-                      <div className="flex justify-between items-center">
-                         <div className="flex-1"><p className="font-black text-slate-800 text-sm leading-tight">{it.quantity}x {it.name}</p><p className="text-[10px] font-bold text-indigo-500 uppercase mt-1">Aguardando Envio</p></div>
-                         <button onClick={() => setCart(cart.filter((_, i) => i !== idx))} className="p-3 text-rose-400 hover:bg-rose-50 rounded-2xl transition-all"><Trash2 size={20}/></button>
-                      </div>
-                      {it.notes && <div className="bg-slate-50 p-3 rounded-xl border border-dashed border-slate-200 text-[10px] font-bold text-slate-600 uppercase">OBS: {it.notes}</div>}
-                   </div>
-                 ))}
+                 <AnimatePresence initial={false}>
+                   {selectedSession.items.map((it, idx) => (
+                     <motion.div 
+                       key={`sent-${idx}`} 
+                       initial={{ opacity: 0, y: 10 }}
+                       animate={{ opacity: 1, y: 0 }}
+                       className="bg-slate-100 p-6 rounded-2xl border flex flex-col gap-2 opacity-70"
+                     >
+                        <div className="flex justify-between items-center"><p className="font-black text-slate-700 text-sm">{it.quantity}x {it.name}</p><span className="text-[10px] font-black text-slate-400">R$ {it.price.toFixed(2)}</span></div>
+                        {it.is_pizza && it.flavors && it.flavors.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {it.flavors.map((flavor, fIdx) => (
+                              <span key={fIdx} className="bg-white/50 text-slate-600 px-2 py-0.5 rounded-full text-[8px] font-black uppercase border border-slate-200">
+                                {flavor}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {it.notes && <p className="text-[9px] font-bold text-amber-600 uppercase italic">OBS: {it.notes}</p>}
+                     </motion.div>
+                   ))}
+                   {cart.map((it, idx) => (
+                     <motion.div 
+                       key={`new-${idx}`} 
+                       initial={{ opacity: 0, x: 20 }}
+                       animate={{ opacity: 1, x: 0 }}
+                       exit={{ opacity: 0, x: -20 }}
+                       layout
+                       className="bg-white p-6 rounded-[2.5rem] border-2 border-indigo-100 flex flex-col gap-3 shadow-sm"
+                     >
+                        <div className="flex justify-between items-center">
+                           <div className="flex-1">
+                             <p className="font-black text-slate-800 text-sm leading-tight">{it.quantity}x {it.name}</p>
+                             <p className="text-[10px] font-bold text-indigo-500 uppercase mt-1">Aguardando Envio</p>
+                           </div>
+                           <button onClick={() => setCart(cart.filter((_, i) => i !== idx))} className="p-3 text-rose-400 hover:bg-rose-50 rounded-2xl transition-all"><Trash2 size={20}/></button>
+                        </div>
+                        {it.is_pizza && it.flavors && it.flavors.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {it.flavors.map((flavor, fIdx) => (
+                              <span key={fIdx} className="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full text-[8px] font-black uppercase border border-indigo-100">
+                                {flavor}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {it.notes && <div className="bg-slate-50 p-3 rounded-xl border border-dashed border-slate-200 text-[10px] font-bold text-slate-600 uppercase">OBS: {it.notes}</div>}
+                     </motion.div>
+                   ))}
+                 </AnimatePresence>
               </div>
               <div className="p-10 border-t bg-white space-y-4 shrink-0 shadow-inner">
                  <div className="space-y-2">

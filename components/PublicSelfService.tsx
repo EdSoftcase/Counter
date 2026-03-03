@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
-import { ShoppingCart, ArrowLeft, Plus, Minus, Search, CheckCircle2, Star, Clock, MapPin, UtensilsCrossed, Bike, User, X } from 'lucide-react';
-import { MenuProduct, ProductCategory, OrderItem, OrderType } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ShoppingCart, ArrowLeft, Plus, Minus, Search, CheckCircle2, Star, Clock, MapPin, UtensilsCrossed, Bike, User, X, Settings, ReceiptText } from 'lucide-react';
+import { MenuProduct, ProductCategory, OrderItem, OrderType, TableSession } from '../types';
 import { supabase } from '../services/supabase';
 
 const MOCK_MENU: MenuProduct[] = [
@@ -18,6 +18,8 @@ const MOCK_MENU: MenuProduct[] = [
   { id: 'bo2', name: 'Borda Cheddar', price: 12.00, category: 'BORDAS' },
 ];
 
+const QUICK_NOTES = ['Sem Cebola', 'Bem Passada', 'Pouco Molho', 'Sem Azeitona', 'Caprichar no Recheio'];
+
 interface PublicSelfServiceProps {
   onOrderComplete?: (order: any) => void;
   onExit?: () => void;
@@ -29,23 +31,49 @@ const PublicSelfService: React.FC<PublicSelfServiceProps> = ({ onOrderComplete, 
   const [activeCategory, setActiveCategory] = useState<ProductCategory | 'TODOS'>('TODOS');
   const [searchQuery, setSearchQuery] = useState('');
   const [showCart, setShowCart] = useState(false);
-  const [orderStatus, setOrderStatus] = useState<'browsing' | 'confirming' | 'success' | 'selecting_type' | 'selecting_table'>('selecting_type');
+  const [orderStatus, setOrderStatus] = useState<'browsing' | 'confirming' | 'success' | 'selecting_type' | 'selecting_table' | 'admin_settings'>('selecting_type');
   const [orderType, setOrderType] = useState<OrderType>('DINE_IN');
   const [customerName, setCustomerName] = useState('');
   const [selectedTable, setSelectedTable] = useState<number | null>(null);
-  const [pizzaSelection, setPizzaSelection] = useState<{ product: MenuProduct, flavors: string[] } | null>(null);
+  const [fixedTable, setFixedTable] = useState<number | null>(null);
+  const [pizzaSelection, setPizzaSelection] = useState<{ 
+    product: MenuProduct, 
+    flavors: MenuProduct[], 
+    border: MenuProduct | null, 
+    notes: string,
+    step: 'FLAVORS' | 'BORDERS'
+  } | null>(null);
+
+  // Carrega configuração de mesa fixa
+  useEffect(() => {
+    const savedFixedTable = localStorage.getItem('COUNTER_FIXED_TABLE');
+    if (savedFixedTable) {
+      const tableNum = parseInt(savedFixedTable);
+      setFixedTable(tableNum);
+      setSelectedTable(tableNum);
+      setOrderType('DINE_IN');
+      setOrderStatus('browsing');
+      setCustomerName('Mesa ' + tableNum);
+    }
+  }, []);
 
   // Timer para voltar ao início após sucesso
-  React.useEffect(() => {
+  useEffect(() => {
     if (orderStatus === 'success') {
       const timer = setTimeout(() => {
-        setOrderStatus('selecting_type');
-        setCustomerName('');
-        setSelectedTable(null);
+        if (fixedTable) {
+          setOrderStatus('browsing');
+          setCart([]);
+        } else {
+          setOrderStatus('selecting_type');
+          setCustomerName('');
+          setSelectedTable(null);
+          setCart([]);
+        }
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [orderStatus]);
+  }, [orderStatus, fixedTable]);
 
   const categories: (ProductCategory | 'TODOS')[] = ['TODOS', 'ENTRADAS', 'PIZZAS', 'PORCOES', 'BEBIDAS'];
 
@@ -55,29 +83,30 @@ const PublicSelfService: React.FC<PublicSelfServiceProps> = ({ onOrderComplete, 
     return matchesCategory && matchesSearch;
   });
 
-  const addToCart = (product: MenuProduct, flavors?: string[]) => {
-    // Se for pizza pequena ou grande e não tiver sabores selecionados, abre o seletor
-    if ((product.id === 'p1' || product.id === 'p2') && !flavors) {
-      setPizzaSelection({ product, flavors: [] });
+  const addToCart = (product: MenuProduct, flavors?: MenuProduct[], border?: MenuProduct | null, notes?: string) => {
+    // Se for pizza e não tiver sabores selecionados, abre o seletor
+    if (product.is_pizza_base && !flavors) {
+      setPizzaSelection({ product, flavors: [], border: null, notes: '', step: 'FLAVORS' });
       return;
     }
 
     setCart(prev => {
-      // Calcula o preço da pizza baseado no sabor mais caro
       let finalPrice = product.price;
+      let itemName = product.name;
+      let flavorNames: string[] = [];
+
       if (flavors && flavors.length > 0) {
-        const flavorPrices = flavors.map(fName => MOCK_MENU.find(m => m.name === fName)?.price || 0);
-        finalPrice = Math.max(...flavorPrices, 0);
+        const maxFlavorPrice = Math.max(...flavors.map(f => f.price), 0);
+        const borderPrice = border?.price || 0;
+        finalPrice = maxFlavorPrice + borderPrice;
+        flavorNames = flavors.map(f => f.name);
+        itemName = `${product.name} (${flavorNames.join(' / ')})${border ? ` + ${border.name}` : ''}`;
       }
 
-      const itemName = flavors && flavors.length > 0 
-        ? `${product.name} (${flavors.join(' / ')})`
-        : product.name;
-        
-      const existing = prev.find(item => item.name === itemName);
+      const existing = prev.find(item => item.name === itemName && item.notes === notes);
       if (existing) {
         return prev.map(item => 
-          item.name === itemName 
+          (item.name === itemName && item.notes === notes)
             ? { ...item, quantity: item.quantity + 1 } 
             : item
         );
@@ -86,10 +115,50 @@ const PublicSelfService: React.FC<PublicSelfServiceProps> = ({ onOrderComplete, 
         product_id: product.id, 
         name: itemName, 
         price: finalPrice, 
-        quantity: 1 
+        quantity: 1,
+        notes: notes,
+        flavors: flavorNames,
+        is_pizza: product.is_pizza_base,
+        sent_to_kitchen: false
       }];
     });
     setPizzaSelection(null);
+  };
+
+  const handleRequestBill = () => {
+    if (!selectedTable) return;
+    
+    const STORAGE_KEY = `COUNTER_TABLES_V5_${userId || 'GENERIC'}`;
+    const savedTables = localStorage.getItem(STORAGE_KEY);
+    let tables = savedTables ? JSON.parse(savedTables) : [];
+    
+    const tableIndex = tables.findIndex((t: any) => t.type === 'DINE_IN' && t.table_number === selectedTable);
+    if (tableIndex > -1) {
+      tables[tableIndex] = {
+        ...tables[tableIndex],
+        bill_requested: true
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tables));
+      alert("Conta solicitada com sucesso! Um atendente virá até você.");
+    } else {
+      alert("Não há consumo registrado para esta mesa.");
+    }
+  };
+
+  const handleSaveAdminSettings = (tableNum: number | null) => {
+    if (tableNum) {
+      localStorage.setItem('COUNTER_FIXED_TABLE', tableNum.toString());
+      setFixedTable(tableNum);
+      setSelectedTable(tableNum);
+      setOrderType('DINE_IN');
+      setCustomerName('Mesa ' + tableNum);
+      setOrderStatus('browsing');
+    } else {
+      localStorage.removeItem('COUNTER_FIXED_TABLE');
+      setFixedTable(null);
+      setSelectedTable(null);
+      setOrderStatus('selecting_type');
+    }
   };
 
   const removeFromCart = (productId: string) => {
@@ -380,6 +449,15 @@ const PublicSelfService: React.FC<PublicSelfServiceProps> = ({ onOrderComplete, 
         
         <div className="flex items-center gap-4">
           <div className="hidden md:flex items-center gap-6 mr-6">
+            {selectedTable && (
+              <button 
+                onClick={handleRequestBill}
+                className="flex items-center gap-2 bg-amber-50 text-amber-600 px-4 py-2 rounded-xl border border-amber-100 hover:bg-amber-100 transition-all"
+              >
+                <ReceiptText size={18} />
+                <span className="text-xs font-black uppercase tracking-widest">Solicitar Conta</span>
+              </button>
+            )}
             <div className="flex items-center gap-2">
               <Star size={16} className="text-amber-400 fill-amber-400" />
               <span className="text-sm font-bold text-slate-700">4.9</span>
@@ -388,6 +466,13 @@ const PublicSelfService: React.FC<PublicSelfServiceProps> = ({ onOrderComplete, 
               <Clock size={16} className="text-slate-400" />
               <span className="text-sm font-bold text-slate-700">25-35 min</span>
             </div>
+            <button 
+              onDoubleClick={() => setOrderStatus('admin_settings')}
+              className="p-2 text-slate-300 hover:text-slate-500 transition-colors"
+              title="Configurações de Administrador"
+            >
+              <Settings size={18} />
+            </button>
           </div>
           <button 
             onClick={() => setShowCart(true)}
@@ -405,6 +490,52 @@ const PublicSelfService: React.FC<PublicSelfServiceProps> = ({ onOrderComplete, 
           </button>
         </div>
       </header>
+
+      {/* Admin Settings Modal */}
+      {orderStatus === 'admin_settings' && (
+        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[400] flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-md rounded-[3rem] p-10 shadow-2xl">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-2xl font-black text-slate-800 tracking-tight">Configurações Totem</h3>
+              <button onClick={() => setOrderStatus('browsing')} className="p-2 text-slate-400 hover:bg-slate-50 rounded-full"><X/></button>
+            </div>
+            
+            <div className="space-y-6">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 mb-2 block">Travar nesta Mesa (Modo Tablet)</label>
+                <div className="grid grid-cols-5 gap-2">
+                  {[null, ...Array.from({ length: 24 }, (_, i) => i + 1)].map(num => (
+                    <button 
+                      key={num === null ? 'none' : num}
+                      onClick={() => handleSaveAdminSettings(num)}
+                      className={`aspect-square rounded-xl border-2 font-black transition-all ${
+                        (num === fixedTable) 
+                          ? 'bg-indigo-600 border-indigo-500 text-white' 
+                          : 'bg-slate-50 border-slate-100 text-slate-400 hover:border-indigo-200'
+                      }`}
+                    >
+                      {num === null ? 'OFF' : num}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                <p className="text-[10px] font-bold text-indigo-700 leading-relaxed">
+                  Ao selecionar um número, este aparelho ficará travado naquela mesa. O cliente não precisará selecionar a mesa e o nome será preenchido automaticamente.
+                </p>
+              </div>
+              
+              <button 
+                onClick={() => setOrderStatus('browsing')}
+                className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl"
+              >
+                Fechar Configurações
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pb-32">
         {/* Banner */}
@@ -492,64 +623,147 @@ const PublicSelfService: React.FC<PublicSelfServiceProps> = ({ onOrderComplete, 
       {pizzaSelection && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[300] flex items-center justify-center p-6 animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-2xl rounded-[3rem] overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
-              <div className="p-10 border-b border-slate-100 flex justify-between items-center">
+              <div className="p-8 border-b border-slate-100 flex justify-between items-center">
                  <div>
                     <h3 className="text-2xl font-black text-slate-800">{pizzaSelection.product.name}</h3>
-                    <p className="text-slate-500 font-medium">Escolha até {pizzaSelection.product.id === 'p1' ? '2' : '3'} sabores</p>
+                    <p className="text-slate-500 font-medium">
+                      {pizzaSelection.step === 'FLAVORS' 
+                        ? `Escolha até ${pizzaSelection.product.max_flavors} sabores` 
+                        : 'Escolha a borda e observações'}
+                    </p>
                  </div>
                  <button onClick={() => setPizzaSelection(null)} className="p-3 bg-slate-100 text-slate-500 rounded-2xl hover:bg-rose-50 hover:text-rose-500 transition-all">
                     <X size={24} />
                  </button>
               </div>
               
-              <div className="p-10 max-h-[60vh] overflow-y-auto custom-scrollbar grid grid-cols-1 sm:grid-cols-2 gap-4">
-                 {MOCK_MENU.filter(p => p.category === 'SABORES_PIZZA').map(flavor => {
-                    const isSelected = pizzaSelection.flavors.includes(flavor.name);
-                    const maxFlavors = pizzaSelection.product.max_flavors || 1;
-                    
-                    return (
-                      <button 
-                        key={flavor.id}
-                        disabled={!isSelected && pizzaSelection.flavors.length >= maxFlavors}
-                        onClick={() => {
-                          setPizzaSelection(prev => {
-                            if (!prev) return null;
-                            if (isSelected) {
-                              return { ...prev, flavors: prev.flavors.filter(f => f !== flavor.name) };
-                            }
-                            return { ...prev, flavors: [...prev.flavors, flavor.name] };
-                          });
-                        }}
-                        className={`p-6 rounded-3xl border-2 text-left transition-all flex flex-col gap-2 ${
-                          isSelected 
-                            ? 'border-indigo-500 bg-indigo-50 shadow-md' 
-                            : 'border-slate-100 bg-white hover:border-slate-200 disabled:opacity-40'
-                        }`}
-                      >
-                         <div className="flex justify-between items-center">
-                            <span className="font-black text-slate-800">{flavor.name}</span>
-                            {isSelected && <CheckCircle2 size={20} className="text-indigo-600" />}
-                         </div>
-                         <p className="text-[10px] text-slate-500 font-medium line-clamp-2">{flavor.description}</p>
-                      </button>
-                    );
-                 })}
+              <div className="p-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                 {pizzaSelection.step === 'FLAVORS' ? (
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                     {MOCK_MENU.filter(p => p.category === 'SABORES_PIZZA').map(flavor => {
+                        const isSelected = pizzaSelection.flavors.some(f => f.id === flavor.id);
+                        const maxFlavors = pizzaSelection.product.max_flavors || 1;
+                        
+                        return (
+                          <button 
+                            key={flavor.id}
+                            disabled={!isSelected && pizzaSelection.flavors.length >= maxFlavors}
+                            onClick={() => {
+                              setPizzaSelection(prev => {
+                                if (!prev) return null;
+                                if (isSelected) {
+                                  return { ...prev, flavors: prev.flavors.filter(f => f.id !== flavor.id) };
+                                }
+                                return { ...prev, flavors: [...prev.flavors, flavor] };
+                              });
+                            }}
+                            className={`p-6 rounded-3xl border-2 text-left transition-all flex flex-col gap-2 ${
+                              isSelected 
+                                ? 'border-indigo-500 bg-indigo-50 shadow-md' 
+                                : 'border-slate-100 bg-white hover:border-slate-200 disabled:opacity-40'
+                            }`}
+                          >
+                             <div className="flex justify-between items-center">
+                                <span className="font-black text-slate-800">{flavor.name}</span>
+                                {isSelected && <CheckCircle2 size={20} className="text-indigo-600" />}
+                             </div>
+                             <p className="text-[10px] text-slate-500 font-medium line-clamp-2">{flavor.description}</p>
+                          </button>
+                        );
+                     })}
+                   </div>
+                 ) : (
+                   <div className="space-y-8">
+                     <div>
+                       <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Escolha a Borda</h4>
+                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                         {MOCK_MENU.filter(p => p.category === 'BORDAS').map(border => (
+                           <button 
+                             key={border.id}
+                             onClick={() => setPizzaSelection(prev => prev ? { ...prev, border } : null)}
+                             className={`p-4 rounded-2xl border-2 text-left transition-all ${
+                               pizzaSelection.border?.id === border.id 
+                                 ? 'border-indigo-500 bg-indigo-50' 
+                                 : 'border-slate-100 bg-white hover:border-slate-200'
+                             }`}
+                           >
+                             <div className="font-black text-slate-800 text-sm">{border.name}</div>
+                             <div className="text-[10px] text-indigo-600 font-bold">+ R$ {border.price.toFixed(2)}</div>
+                           </button>
+                         ))}
+                         <button 
+                           onClick={() => setPizzaSelection(prev => prev ? { ...prev, border: null } : null)}
+                           className={`p-4 rounded-2xl border-2 text-left transition-all ${
+                             !pizzaSelection.border 
+                               ? 'border-indigo-500 bg-indigo-50' 
+                               : 'border-slate-100 bg-white hover:border-slate-200'
+                           }`}
+                         >
+                           <div className="font-black text-slate-800 text-sm">Sem Borda</div>
+                           <div className="text-[10px] text-slate-400 font-bold">Grátis</div>
+                         </button>
+                       </div>
+                     </div>
+
+                     <div>
+                       <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Observações</h4>
+                       <div className="flex flex-wrap gap-2 mb-4">
+                         {QUICK_NOTES.map(note => (
+                           <button 
+                             key={note}
+                             onClick={() => setPizzaSelection(prev => prev ? { ...prev, notes: prev.notes ? `${prev.notes}, ${note}` : note } : null)}
+                             className="px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-[10px] font-bold text-slate-600 transition-colors"
+                           >
+                             {note}
+                           </button>
+                         ))}
+                       </div>
+                       <textarea 
+                         value={pizzaSelection.notes}
+                         onChange={(e) => setPizzaSelection(prev => prev ? { ...prev, notes: e.target.value } : null)}
+                         placeholder="Ex: Sem cebola, bem assada..."
+                         className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-medium outline-none focus:border-indigo-500 transition-all h-24"
+                       />
+                     </div>
+                   </div>
+                 )}
               </div>
               
-              <div className="p-10 bg-slate-50 flex flex-col gap-4">
+              <div className="p-8 bg-slate-50 flex flex-col gap-4">
                  <div className="flex justify-between items-center">
-                    <span className="text-slate-500 font-black uppercase text-[10px] tracking-widest">Selecionados: {pizzaSelection.flavors.length} / {pizzaSelection.product.id === 'p1' ? '2' : '3'}</span>
+                    <span className="text-slate-500 font-black uppercase text-[10px] tracking-widest">
+                      {pizzaSelection.step === 'FLAVORS' 
+                        ? `Sabores: ${pizzaSelection.flavors.length} / ${pizzaSelection.product.max_flavors}`
+                        : `Borda: ${pizzaSelection.border?.name || 'Sem Borda'}`}
+                    </span>
                     {pizzaSelection.flavors.length > 0 && (
-                      <span className="text-indigo-600 font-black text-sm">{pizzaSelection.flavors.join(' + ')}</span>
+                      <span className="text-indigo-600 font-black text-sm">{pizzaSelection.flavors.map(f => f.name).join(' + ')}</span>
                     )}
                  </div>
-                 <button 
-                   disabled={pizzaSelection.flavors.length === 0}
-                   onClick={() => addToCart(pizzaSelection.product, pizzaSelection.flavors)}
-                   className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-indigo-600 disabled:opacity-50 disabled:bg-slate-300 transition-all active:scale-95"
-                 >
-                    Confirmar Sabores
-                 </button>
+                 {pizzaSelection.step === 'FLAVORS' ? (
+                   <button 
+                     disabled={pizzaSelection.flavors.length === 0}
+                     onClick={() => setPizzaSelection(prev => prev ? { ...prev, step: 'BORDERS' } : null)}
+                     className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-indigo-600 disabled:opacity-50 disabled:bg-slate-300 transition-all active:scale-95"
+                   >
+                      Próximo: Borda & Obs
+                   </button>
+                 ) : (
+                   <div className="grid grid-cols-2 gap-4">
+                     <button 
+                       onClick={() => setPizzaSelection(prev => prev ? { ...prev, step: 'FLAVORS' } : null)}
+                       className="py-6 bg-white text-slate-900 border-2 border-slate-200 rounded-[2rem] font-black uppercase tracking-[0.2em] hover:bg-slate-100 transition-all"
+                     >
+                        Voltar
+                     </button>
+                     <button 
+                       onClick={() => addToCart(pizzaSelection.product, pizzaSelection.flavors, pizzaSelection.border, pizzaSelection.notes)}
+                       className="py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] shadow-xl hover:bg-indigo-600 transition-all active:scale-95"
+                     >
+                        Finalizar
+                     </button>
+                   </div>
+                 )}
               </div>
            </div>
         </div>

@@ -79,6 +79,7 @@ export interface TableSession {
   terminal_id?: string;
   split_count?: number;
   paid_amount?: number;
+  bill_requested?: boolean;
 }
 
 export interface Unit { id: string; company_id: string; name: string; address: string; }
